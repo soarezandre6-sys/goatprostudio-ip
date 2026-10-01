@@ -419,3 +419,16 @@ Branch: `build-11-alpha`
 - identidade visual da Build 10 preservada;
 - múltiplas lentes, 2K/4K experimental e H.264 baixa latência preservados;
 - workflow separado da Build 10.
+
+
+### APK Build 11 gerado
+- workflow run: 36902667164 (#22);
+- conclusão: success;
+- artifact: goat-pro-ip-build-11-debug;
+- artifact id: 11182327082;
+- artifact digest: sha256:4702317428a447b3ee02ddbf6d737d70eb74a519f4f87e902a36a308365e616b;
+- APK SHA-256: a247d5799e0fa2750565f1d12b45e4a8a13bdb6638290ec2b969fc10a43a0ec8;
+- tamanho APK: 4.833.940 bytes;
+- integridade ZIP/APK: OK;
+- targetSdk/compileSdk: 36;
+- link interno oficial: https://goatprostudio.com.br.

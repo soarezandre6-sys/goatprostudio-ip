@@ -501,25 +501,62 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
 
-                            // CameraX now rotates the ImageProxy natively to targetRotation.
-                            // AUTO therefore requires no Kotlin per-pixel rotation. Manual
-                            // overrides are still applied as an explicit extra quarter-turn.
+                            // CameraX rotates AUTO natively. The processed NV21 frame
+                            // is shared by MJPEG and the hardware H.264 path so we do not
+                            // perform the color/crop/rotation work twice.
                             val manualRotation = selectedRotationMode.offsetDegrees
-                            val encodeStartedNs = System.nanoTime()
-                            val encoded = ImageUtils.imageProxyToJpeg(
+                            val prepared = ImageUtils.imageProxyToNv21(
                                 image = image,
-                                quality = streamJpegQuality,
                                 rotationDegrees = manualRotation
                             )
-                            val encodeElapsedNs = System.nanoTime() - encodeStartedNs
 
-                            if (encoded != null) {
-                                server.offerFrame(encoded.bytes)
-                                recordEncodedFrame(encoded.bytes.size, encodeElapsedNs)
-                                if (encoded.width != actualStreamWidth || encoded.height != actualStreamHeight) {
-                                    actualStreamWidth = encoded.width
-                                    actualStreamHeight = encoded.height
+                            if (prepared != null) {
+                                if (prepared.width != actualStreamWidth ||
+                                    prepared.height != actualStreamHeight
+                                ) {
+                                    actualStreamWidth = prepared.width
+                                    actualStreamHeight = prepared.height
                                     runOnUiThread { updateStreamInfo() }
+                                }
+
+                                // Keep MJPEG for compatibility, but skip JPEG compression
+                                // when nobody is watching the MJPEG endpoint.
+                                if (server.videoClientCount() > 0) {
+                                    val jpegStartedNs = System.nanoTime()
+                                    val jpeg = ImageUtils.nv21ToJpeg(
+                                        prepared,
+                                        streamJpegQuality
+                                    )
+                                    val jpegElapsedNs = System.nanoTime() - jpegStartedNs
+                                    if (jpeg != null) {
+                                        server.offerFrame(jpeg.bytes)
+                                        recordEncodedFrame(jpeg.bytes.size, jpegElapsedNs)
+                                    }
+                                }
+
+                                // RTSP H.264 is encoded by MediaCodec. With only an RTSP
+                                // viewer connected there is no JPEG encode in the hot path.
+                                if (rtspServer.activeClientCount() > 0) {
+                                    val h264Fps =
+                                        (if (streamTargetFps > 0) streamTargetFps else 30)
+                                            .coerceIn(5, 60)
+                                    val bitrate = H264Encoder.recommendedBitrate(
+                                        prepared.width,
+                                        prepared.height,
+                                        h264Fps,
+                                        streamJpegQuality
+                                    )
+                                    if (h264Encoder.ensureStarted(
+                                            prepared.width,
+                                            prepared.height,
+                                            h264Fps,
+                                            bitrate
+                                        )
+                                    ) {
+                                        h264Encoder.offerNv21(prepared, now)
+                                    }
+                                } else if (h264Encoder.isRunning()) {
+                                    h264Encoder.stop()
                                 }
                             }
                             publishPerformanceStatsIfDue(System.nanoTime())

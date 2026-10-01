@@ -148,6 +148,37 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private val rtspServer by lazy {
+        RtspH264Server(8554, object : RtspH264Server.Listener {
+            override fun onActiveClientCountChanged(count: Int) {
+                if (count > 0) {
+                    h264Encoder.requestKeyFrame()
+                } else {
+                    h264Encoder.stop()
+                }
+                runOnUiThread { updateConnectionStatus(server.videoClientCount()) }
+            }
+        })
+    }
+
+    private val h264Encoder by lazy {
+        H264Encoder(object : H264Encoder.Listener {
+            override fun onAccessUnit(
+                data: ByteArray,
+                presentationTimeUs: Long,
+                keyFrame: Boolean,
+                codecConfig: Boolean
+            ) {
+                rtspServer.onAccessUnit(
+                    data,
+                    presentationTimeUs,
+                    keyFrame,
+                    codecConfig
+                )
+            }
+        })
+    }
+
     private val audioCapture by lazy {
         AudioCapture(this, server::offerAudio)
     }

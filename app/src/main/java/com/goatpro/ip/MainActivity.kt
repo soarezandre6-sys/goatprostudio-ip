@@ -470,6 +470,8 @@ class MainActivity : AppCompatActivity() {
                 manualExposureEnabled = false
                 manualRequestApplied = false
                 manualControlStatus = "Exposição automática"
+                manualFocusEnabled = false
+                manualFocusDiopters = 0f
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
@@ -717,6 +719,33 @@ class MainActivity : AppCompatActivity() {
                 camera.cameraControl.startFocusAndMetering(focus)
             }
 
+            "focusMode" -> {
+                manualFocusEnabled = value == "manual" || value == "1" || value.equals("true", true)
+                if (manualFocusEnabled) {
+                    val maxFocus = manualFocusMaxDiopters()
+                    if (maxFocus <= 0f) {
+                        manualFocusEnabled = false
+                        return
+                    }
+                    manualFocusDiopters = manualFocusDiopters.coerceIn(0f, maxFocus)
+                    applyManualFocus()
+                } else {
+                    disableManualFocus()
+                }
+            }
+
+            "focusDistance" -> {
+                val maxFocus = manualFocusMaxDiopters()
+                val requested = value?.toFloatOrNull() ?: return
+                if (maxFocus <= 0f) {
+                    manualFocusEnabled = false
+                    return
+                }
+                manualFocusEnabled = true
+                manualFocusDiopters = requested.coerceIn(0f, maxFocus)
+                applyManualFocus()
+            }
+
             "manual" -> {
                 manualExposureEnabled = value == "1" || value.equals("true", true)
                 if (manualExposureEnabled) {
@@ -737,6 +766,64 @@ class MainActivity : AppCompatActivity() {
                 manualExposureTimeNs = requestedUs.coerceAtLeast(1L) * 1_000L
                 if (manualExposureEnabled) applyManualExposure()
             }
+        }
+    }
+
+    private fun manualFocusMaxDiopters(): Float {
+        val camera = currentCamera ?: return 0f
+        return try {
+            Camera2CameraInfo.from(camera.cameraInfo)
+                .getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE
+                ) ?: 0f
+        } catch (_: Exception) {
+            0f
+        }
+    }
+
+    private fun applyManualFocus(): Boolean {
+        val camera = currentCamera ?: return false
+        val maxFocus = manualFocusMaxDiopters()
+        if (!manualFocusEnabled || maxFocus <= 0f) {
+            manualFocusEnabled = false
+            return false
+        }
+
+        return try {
+            manualFocusDiopters = manualFocusDiopters.coerceIn(0f, maxFocus)
+            val options = CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    manualFocusDiopters
+                )
+                .build()
+            Camera2CameraControl.from(camera.cameraControl)
+                .addCaptureRequestOptions(options)
+            true
+        } catch (_: Exception) {
+            manualFocusEnabled = false
+            false
+        }
+    }
+
+    private fun disableManualFocus(): Boolean {
+        val camera = currentCamera ?: return false
+        return try {
+            manualFocusEnabled = false
+            manualFocusDiopters = 0f
+            val control = Camera2CameraControl.from(camera.cameraControl)
+            control.clearCaptureRequestOptions()
+
+            if (manualExposureEnabled) {
+                applyManualExposure()
+            }
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -846,7 +933,7 @@ class MainActivity : AppCompatActivity() {
             manualControlStatus =
                 "Aplicando manual: ISO $manualIso • ${manualExposureTimeNs / 1_000L} µs"
 
-            val future = control.setCaptureRequestOptions(options)
+            val future = control.addCaptureRequestOptions(options)
             future.addListener({
                 try {
                     future.get()
@@ -884,6 +971,9 @@ class MainActivity : AppCompatActivity() {
                 try {
                     future.get()
                     manualControlStatus = "Exposição automática"
+                    if (manualFocusEnabled) {
+                        applyManualFocus()
+                    }
                 } catch (ex: Exception) {
                     manualControlStatus =
                         "Falha ao restaurar automático: ${ex.cause?.message ?: ex.message ?: "Camera2"}"
@@ -915,6 +1005,8 @@ class MainActivity : AppCompatActivity() {
             val minShutterUs = (shutterRange?.first ?: 100_000L) / 1_000L
             val maxShutterUs = (shutterRange?.last ?: 1_000_000_000L) / 1_000L
             val currentShutterUs = manualExposureTimeNs / 1_000L
+            val maxFocusDiopters = manualFocusMaxDiopters()
+            val manualFocusSupported = maxFocusDiopters > 0f
 
             "{\"available\":true" +
                 ",\"resolution\":\"${selectedPreset.name}\"" +
@@ -936,6 +1028,10 @@ class MainActivity : AppCompatActivity() {
                 ",\"manualSupported\":$manualSupported" +
                 ",\"manual\":$manualExposureEnabled" +
                 ",\"manualApplied\":$manualRequestApplied" +
+                ",\"manualFocusSupported\":$manualFocusSupported" +
+                ",\"manualFocus\":$manualFocusEnabled" +
+                ",\"focusDiopters\":$manualFocusDiopters" +
+                ",\"maxFocusDiopters\":$maxFocusDiopters" +
                 ",\"iso\":$manualIso" +
                 ",\"minIso\":${isoRange?.first ?: 50}" +
                 ",\"maxIso\":${isoRange?.last ?: 12800}" +

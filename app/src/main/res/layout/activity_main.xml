@@ -36,7 +36,7 @@
                 <ImageView
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:contentDescription="Logo GOAT PRO IP"
+                    android:contentDescription="Logo GOAT Cam"
                     android:scaleType="fitCenter"
                     android:src="@drawable/goat_pro_ip_mark" />
             </FrameLayout>
@@ -53,7 +53,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="sans-serif-medium"
                     android:letterSpacing="0.02"
-                    android:text="GOAT PRO IP"
+                    android:text="GOAT Cam"
                     android:textColor="@color/gold"
                     android:textSize="27sp"
                     android:textStyle="bold" />
@@ -62,7 +62,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Câmera IP profissional para o GOAT PRO Studio"
+                    android:text="Câmera móvel oficial para o GOAT PRO Studio"
                     android:textColor="@color/muted"
                     android:textSize="12sp" />
 
@@ -70,7 +70,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="BUILD 11 • ANDROID 16 • MULTI-LENTE"
+                    android:text="BUILD 12 • GOAT CAM • ANDROID 16"
                     android:textColor="@color/gold_soft"
                     android:textSize="10sp"
                     android:textStyle="bold" />
@@ -418,7 +418,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="13dp"
             android:gravity="center"
-            android:text="GOAT PRO IP • Build 11 experimental • Android 16"
+            android:text="GOAT Cam • Build 12 experimental • Android 16"
             android:textColor="@color/muted"
             android:textSize="10sp" />
 

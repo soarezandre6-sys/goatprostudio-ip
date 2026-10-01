@@ -394,3 +394,16 @@ Branch: `build-10-alpha`
 - removida a borda/quadrado preto que contornava o bode no ícone antigo;
 - ícone técnico do launcher e marca usada dentro do app agora são separados;
 - Build 10 segue com múltiplas lentes + 2K/4K experimentais + H.264 baixa latência.
+
+
+### APK Build 10 gerado após revisão visual
+- workflow run: 36898883960 (#21);
+- conclusão: success;
+- artifact: goat-pro-ip-build-10-debug;
+- artifact id: 11180168888;
+- artifact digest: sha256:1db5954420825d1e576a2c99930b6fda4678a3183f59f1184f9bbbcdef54ddfe;
+- APK final: GOAT-PRO-IP-Build-10.apk;
+- APK SHA-256: e9437b5cd85980d0a3a2800e47b05d3d8f627225f272163845ca5fe30d09c905;
+- tamanho APK: 4.833.740 bytes;
+- validação ZIP/APK: sem erros de integridade;
+- recursos confirmados dentro do APK: adaptive launcher icon, marca sem moldura preta, novo layout, cartões, spinner estilizado.

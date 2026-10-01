@@ -1380,6 +1380,8 @@ class MainActivity : AppCompatActivity() {
                 ",\"rotation\":\"${selectedRotationMode.name}\"" +
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
+                ",\"rtspClients\":${rtspServer.activeClientCount()}" +
+                ",\"h264Running\":${h264Encoder.isRunning()}" +
                 ",\"camera\":\"$cameraName\"" +
                 ",\"torch\":$torchEnabled" +
                 ",\"zoom\":$currentZoom" +
@@ -1481,6 +1483,7 @@ class MainActivity : AppCompatActivity() {
         nextEncodeDueNs = 0L
         resetPerformanceStats()
         server.start()
+        rtspServer.start()
         server.setAudioEnabled(audioEnabled)
         if (audioEnabled && !audioCapture.start()) {
             audioEnabled = false
@@ -1499,6 +1502,8 @@ class MainActivity : AppCompatActivity() {
     private fun stopStreaming() {
         audioCapture.stop()
         server.setAudioEnabled(false)
+        h264Encoder.stop()
+        rtspServer.stop()
         server.stop()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
@@ -1511,9 +1516,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateConnectionStatus(count: Int) {
         if (!::connectionStatusText.isInitialized) return
+        val totalCount = count + rtspServer.activeClientCount()
         when {
-            count > 0 -> {
-                connectionStatusText.text = "CONECTADO AO GOAT PRO STUDIO • $count conexão(ões)"
+            totalCount > 0 -> {
+                connectionStatusText.text = "CONECTADO AO GOAT PRO STUDIO • $totalCount conexão(ões)"
                 connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.green))
             }
             server.isRunning() -> {
@@ -1544,7 +1550,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAddress() {
         val ip = NetworkUtils.localIpv4()
         addressText.text = if (ip != null) {
-            "http://$ip:8080/video"
+            "MJPEG: http://$ip:8080/video\nH.264 RTSP: rtsp://$ip:8554/h264"
         } else {
             "Sem endereço Wi-Fi disponível"
         }
@@ -1569,10 +1575,11 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Conecte o celular ao Wi-Fi primeiro.", Toast.LENGTH_SHORT).show()
             return
         }
-        val url = "http://$ip:8080/video"
+        val urls =
+            "MJPEG: http://$ip:8080/video\nH.264 RTSP: rtsp://$ip:8554/h264"
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("GOAT PRO IP", url))
-        Toast.makeText(this, "Endereço copiado", Toast.LENGTH_SHORT).show()
+        clipboard.setPrimaryClip(ClipData.newPlainText("GOAT PRO IP", urls))
+        Toast.makeText(this, "Endereços MJPEG e H.264 copiados", Toast.LENGTH_SHORT).show()
     }
 
     override fun onResume() {
@@ -1596,6 +1603,8 @@ class MainActivity : AppCompatActivity() {
         discoveryResponder.stop()
         audioCapture.stop()
         server.setAudioEnabled(false)
+        h264Encoder.stop()
+        rtspServer.stop()
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()

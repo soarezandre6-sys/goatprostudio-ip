@@ -3,6 +3,7 @@ package com.goatpro.ip
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.os.Build
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
@@ -56,6 +57,21 @@ class H264Encoder(
                 val caps = encoder.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
                 val colorFormat = chooseColorFormat(caps.colorFormats)
 
+                val encoderCaps = caps.encoderCapabilities
+                val bitrateMode = if (
+                    encoderCaps.isBitrateModeSupported(
+                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+                    )
+                ) {
+                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+                } else {
+                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+                }
+
+                val baselineSupported = caps.profileLevels.any {
+                    it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
+                }
+
                 val format = MediaFormat.createVideoFormat(
                     MediaFormat.MIMETYPE_VIDEO_AVC,
                     safeWidth,
@@ -65,10 +81,42 @@ class H264Encoder(
                     setInteger(MediaFormat.KEY_BIT_RATE, safeBitrate)
                     setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                    setInteger(
-                        MediaFormat.KEY_BITRATE_MODE,
-                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
-                    )
+                    setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode)
+
+                    // Favor realtime encoding over compression efficiency. Avoid frame
+                    // reordering (B-frames), which adds latency even when FPS is high.
+                    runCatching { setInteger(MediaFormat.KEY_PRIORITY, 0) }
+                    runCatching {
+                        setFloat(
+                            MediaFormat.KEY_OPERATING_RATE,
+                            safeFps.toFloat()
+                        )
+                    }
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        runCatching {
+                            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                        }
+                        // Repeat SPS/PPS on IDR so an RTSP client can start decoding
+                        // immediately without waiting for extra codec configuration.
+                        runCatching {
+                            setInteger("prepend-sps-pps-to-idr-frames", 1)
+                        }
+                    }
+                    if (Build.VERSION.SDK_INT >= 30 &&
+                        caps.isFeatureSupported(
+                            MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
+                        )
+                    ) {
+                        runCatching { setInteger("low-latency", 1) }
+                    }
+                    if (baselineSupported) {
+                        runCatching {
+                            setInteger(
+                                MediaFormat.KEY_PROFILE,
+                                MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
+                            )
+                        }
+                    }
                 }
 
                 encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)

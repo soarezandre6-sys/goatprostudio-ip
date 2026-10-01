@@ -146,7 +146,7 @@ class MjpegServer(
 
     private fun serveAudioPcm(socket: Socket) {
         if (!audioEnabled.get()) {
-            serveText(socket, "503 Service Unavailable", "text/plain; charset=utf-8", "Microfone do GOAT PRO IP desligado")
+            serveText(socket, "503 Service Unavailable", "text/plain; charset=utf-8", "Microfone do GOAT Cam desligado")
             return
         }
         socket.soTimeout = 0
@@ -194,7 +194,7 @@ class MjpegServer(
     }
 
     private fun serveHealth(socket: Socket) {
-        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.11.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
+        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.12.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
         serveText(socket, "200 OK", "application/json", body)
     }
 
@@ -234,7 +234,7 @@ class MjpegServer(
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width,initial-scale=1">
-              <title>GOAT PRO IP · Controles</title>
+              <title>GOAT Cam · Controles</title>
               <style>
                 body{margin:0;background:#05070A;color:#fff;font-family:Arial,sans-serif}
                 .wrap{max-width:980px;margin:auto;padding:18px}
@@ -259,7 +259,7 @@ class MjpegServer(
             </head>
             <body>
               <div class="wrap">
-                <h1>GOAT PRO IP</h1>
+                <h1>GOAT Cam</h1>
                 <div class="muted">Painel web da câmera · controles aplicados no celular em tempo real</div>
                 <div class="muted" id="rtspAddress" style="margin-top:5px;color:#9ee493"></div>
                 <div class="grid">

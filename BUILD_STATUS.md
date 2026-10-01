@@ -275,3 +275,17 @@ Correção adicional da Build 8:
 - painel exibe o obturador em formato amigável (ex.: 1/1000 s, 1/30 s, 100 ms) e também em microssegundos;
 - limites mínimo/máximo da câmera aparecem abaixo de cada slider;
 - nenhuma nova APK gerada após esta correção.
+
+
+### Foco manual e pipeline de imagem — correções adicionais da Build 8
+- foco manual adicionado ao painel web;
+- chave Auto/Manual + slider de distância;
+- Camera2 usa CONTROL_AF_MODE_OFF + LENS_FOCUS_DISTANCE no modo manual;
+- slider respeita LENS_INFO_MINIMUM_FOCUS_DISTANCE informado pela lente;
+- 0 dioptrias representa infinito/longe e o limite máximo representa foco mais próximo/macro;
+- autofocus central desliga o modo manual antes de executar AF;
+- foco manual e exposição manual passam a coexistir sem sobrescrever os respectivos overrides Camera2;
+- CameraX atualizado de 1.4.1 para 1.5.1;
+- ImageAnalysis passa a solicitar OUTPUT_IMAGE_FORMAT_NV21 diretamente, reduzindo conversão/reorganização de chroma no pipeline;
+- objetivo continua sendo 1920×1080 real próximo de 20 FPS antes de avançar para 2K/4K;
+- APK ainda não compilado após essas alterações.

@@ -405,6 +405,7 @@ class MainActivity : AppCompatActivity() {
                 .setResolutionSelector(resolutionSelector)
                 .setTargetRotation(targetRotation)
                 .setOutputImageRotationEnabled(true)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { useCase ->

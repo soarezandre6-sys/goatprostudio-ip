@@ -77,6 +77,7 @@ class MjpegServer(
     private fun serve(socket: Socket) {
         try {
             socket.tcpNoDelay = true
+            socket.sendBufferSize = 128 * 1024
             socket.soTimeout = 10_000
 
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
@@ -106,7 +107,9 @@ class MjpegServer(
     private fun serveMjpeg(socket: Socket) {
         addVideoClient(socket)
         socket.soTimeout = 0
-        val out = BufferedOutputStream(socket.getOutputStream(), 256 * 1024)
+        // Avoid a large user-space queue. MJPEG should favor the newest frame over
+        // buffering old frames when Wi-Fi throughput briefly drops.
+        val out = socket.getOutputStream()
         out.write(
             ("HTTP/1.1 200 OK\r\n" +
                 "Cache-Control: no-cache, no-store, must-revalidate\r\n" +
@@ -184,7 +187,7 @@ class MjpegServer(
     }
 
     private fun serveHealth(socket: Socket) {
-        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.4.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
+        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.5.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
         serveText(socket, "200 OK", "application/json", body)
     }
 

@@ -923,6 +923,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     CameraSelector.LENS_FACING_BACK
                 }
+                refreshResolutionOptions()
                 startCamera()
             }
 

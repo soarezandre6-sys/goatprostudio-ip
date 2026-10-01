@@ -36,6 +36,8 @@ class DiscoveryResponder(
                             append("|ip=").append(ip)
                             append("|port=").append(httpPort)
                             append("|video=/video")
+                            append("|rtspPort=8554")
+                            append("|h264=/h264")
                             append("|audio=/audio.pcm")
                             append("|streaming=").append(if (isStreaming()) "1" else "0")
                             append("|audioEnabled=").append(if (isAudioEnabled()) "1" else "0")

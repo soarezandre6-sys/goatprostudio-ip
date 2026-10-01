@@ -1242,19 +1242,15 @@ class MainActivity : AppCompatActivity() {
                     audioPermission.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
+            "cameraLens" -> {
+                val option = cameraLensOptions.firstOrNull {
+                    it.key == value
+                } ?: return
+                selectCameraLens(option)
+            }
+
             "switch" -> {
-                if (torchEnabled) {
-                    camera?.cameraControl?.enableTorch(false)
-                    torchEnabled = false
-                }
-                manualExposureEnabled = false
-                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                    CameraSelector.LENS_FACING_FRONT
-                } else {
-                    CameraSelector.LENS_FACING_BACK
-                }
-                refreshResolutionOptions()
-                startCamera()
+                cycleCameraLens()
             }
 
             "torch" -> toggleTorch()
@@ -1792,7 +1788,13 @@ class MainActivity : AppCompatActivity() {
             val minZoom = zoom?.minZoomRatio ?: 1f
             val maxZoom = zoom?.maxZoomRatio ?: 1f
             val currentEv = exposure.exposureCompensationIndex
-            val cameraName = if (lensFacing == CameraSelector.LENS_FACING_BACK) "traseira" else "frontal"
+            val cameraName =
+                selectedCameraOption?.label
+                    ?: if (lensFacing == CameraSelector.LENS_FACING_BACK) "Traseira" else "Frontal"
+            val cameraKey = selectedCameraOption?.key ?: ""
+            val cameraOptionsCsv = cameraLensOptions.joinToString(";") {
+                it.key + "|" + it.label.replace(";", " ").replace("|", " ")
+            }
             val minShutterUs = (shutterRange?.first ?: 100_000L) / 1_000L
             val maxShutterUs = (shutterRange?.last ?: 1_000_000_000L) / 1_000L
             val currentShutterUs = manualExposureTimeNs / 1_000L
@@ -1824,6 +1826,8 @@ class MainActivity : AppCompatActivity() {
                 ",\"rtspClients\":${rtspServer.activeClientCount()}" +
                 ",\"h264Running\":${h264Encoder.isRunning()}" +
                 ",\"camera\":\"$cameraName\"" +
+                ",\"cameraKey\":\"$cameraKey\"" +
+                ",\"cameraOptionsCsv\":\"$cameraOptionsCsv\"" +
                 ",\"torch\":$torchEnabled" +
                 ",\"zoom\":$currentZoom" +
                 ",\"minZoom\":$minZoom" +

@@ -24,6 +24,7 @@ class MjpegServer(
     private val latestFrame = AtomicReference<ByteArray?>(null)
     private val latestAudio = AtomicReference<AudioChunk?>(null)
     private val audioSequence = AtomicLong(0L)
+    private val audioEnabled = AtomicBoolean(false)
     private val clients = CopyOnWriteArrayList<Socket>()
     private val videoClients = CopyOnWriteArrayList<Socket>()
     private var serverThread: Thread? = null
@@ -36,6 +37,13 @@ class MjpegServer(
     fun offerAudio(pcm16le: ByteArray) {
         latestAudio.set(AudioChunk(audioSequence.incrementAndGet(), pcm16le))
     }
+
+    fun setAudioEnabled(enabled: Boolean) {
+        audioEnabled.set(enabled)
+        if (!enabled) latestAudio.set(null)
+    }
+
+    fun isAudioEnabled(): Boolean = audioEnabled.get()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -127,6 +135,10 @@ class MjpegServer(
     }
 
     private fun serveAudioPcm(socket: Socket) {
+        if (!audioEnabled.get()) {
+            serveText(socket, "503 Service Unavailable", "text/plain; charset=utf-8", "Microfone do GOAT PRO IP desligado")
+            return
+        }
         socket.soTimeout = 0
         val out = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
         out.write(
@@ -140,7 +152,7 @@ class MjpegServer(
         out.flush()
 
         var lastSequence = -1L
-        while (running.get() && !socket.isClosed) {
+        while (running.get() && audioEnabled.get() && !socket.isClosed) {
             val chunk = latestAudio.get()
             if (chunk == null || chunk.sequence == lastSequence) {
                 Thread.sleep(5)
@@ -172,7 +184,7 @@ class MjpegServer(
     }
 
     private fun serveHealth(socket: Socket) {
-        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"videoClients\":${videoClients.size}}"
+        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.3.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
         serveText(socket, "200 OK", "application/json", body)
     }
 

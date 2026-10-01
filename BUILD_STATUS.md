@@ -20,8 +20,8 @@ Estado atual: primeira versão Android em desenvolvimento/teste.
 - workflow de compilação Android preparado.
 
 ### Arquivos de referência
-- APK de teste: `artifacts/GOAT_PRO_IP_Build1.apk`
-- Plano de ação: `docs/GOAT_PRO_IP_Plano_de_Acao.pdf`
+- APK de teste: será gerado pelo workflow `.github/workflows/android-debug.yml` após execução do GitHub Actions.
+- Plano de ação: `docs/PLANO_DE_ACAO.md`
 - Roteiro de teste: `docs/BUILD_1_TESTE.md`
 
 ### Próxima validação

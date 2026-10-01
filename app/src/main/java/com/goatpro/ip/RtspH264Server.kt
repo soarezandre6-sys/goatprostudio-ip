@@ -86,6 +86,8 @@ class RtspH264Server(
                             break
                         }
                         socket.tcpNoDelay = true
+                        runCatching { socket.sendBufferSize = 64 * 1024 }
+                        runCatching { socket.trafficClass = 0x10 }
                         Thread {
                             handleClient(socket)
                         }.apply {
@@ -162,6 +164,11 @@ class RtspH264Server(
                 sendNals.forEachIndexed { index, nal ->
                     val marker = index == sendNals.lastIndex
                     sendNal(client, nal, timestamp, marker)
+                }
+                if (client.transportMode == TransportMode.TCP) {
+                    synchronized(client.writeLock) {
+                        client.output.flush()
+                    }
                 }
             } catch (_: Exception) {
                 removeClient(client)
@@ -475,12 +482,77 @@ class RtspH264Server(
 
             TransportMode.TCP -> {
                 synchronized(client.writeLock) {
-                    client.output.write('$'.code)
+                    client.output.write('
+
+            else -> Unit
+        }
+    }
+
+    private fun splitNals(data: ByteArray): List<ByteArray> {
+        val starts = mutableListOf<Pair<Int, Int>>()
+        var i = 0
+        while (i + 3 < data.size) {
+            if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) {
+                if (data[i + 2] == 1.toByte()) {
+                    starts.add(i to 3)
+                    i += 3
+                    continue
+                }
+                if (i + 3 < data.size &&
+                    data[i + 2] == 0.toByte() &&
+                    data[i + 3] == 1.toByte()
+                ) {
+                    starts.add(i to 4)
+                    i += 4
+                    continue
+                }
+            }
+            i++
+        }
+
+        if (starts.isNotEmpty()) {
+            val result = ArrayList<ByteArray>()
+            starts.forEachIndexed { index, pair ->
+                val start = pair.first + pair.second
+                val end = if (index + 1 < starts.size) starts[index + 1].first else data.size
+                if (end > start) result.add(data.copyOfRange(start, end))
+            }
+            return result
+        }
+
+        // Some MediaCodec implementations return AVCC length-prefixed NAL units.
+        val avcc = ArrayList<ByteArray>()
+        var pos = 0
+        while (pos + 4 <= data.size) {
+            val length =
+                ((data[pos].toInt() and 0xff) shl 24) or
+                    ((data[pos + 1].toInt() and 0xff) shl 16) or
+                    ((data[pos + 2].toInt() and 0xff) shl 8) or
+                    (data[pos + 3].toInt() and 0xff)
+            pos += 4
+            if (length <= 0 || pos + length > data.size) {
+                avcc.clear()
+                break
+            }
+            avcc.add(data.copyOfRange(pos, pos + length))
+            pos += length
+        }
+        if (avcc.isNotEmpty() && pos == data.size) return avcc
+
+        return listOf(data)
+    }
+
+    private fun nalType(nal: ByteArray): Int =
+        if (nal.isEmpty()) -1 else nal[0].toInt() and 0x1f
+
+    private fun ssrcHex(ssrc: Int): String =
+        String.format(Locale.US, "%08X", ssrc)
+}
+.code)
                     client.output.write(client.tcpRtpChannel and 0xff)
                     client.output.write((packet.size ushr 8) and 0xff)
                     client.output.write(packet.size and 0xff)
                     client.output.write(packet)
-                    client.output.flush()
                 }
             }
 

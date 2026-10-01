@@ -97,6 +97,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var manualExposureTimeNs = 10_000_000L
 
+    @Volatile
+    private var manualRequestApplied = false
+
+    @Volatile
+    private var manualControlStatus = "Exposição automática"
+
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {
@@ -445,6 +451,8 @@ class MainActivity : AppCompatActivity() {
                 analysisUseCase = analysis
                 currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
                 manualExposureEnabled = false
+                manualRequestApplied = false
+                manualControlStatus = "Exposição automática"
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
@@ -605,7 +613,11 @@ class MainActivity : AppCompatActivity() {
 
             "manual" -> {
                 manualExposureEnabled = value == "1" || value.equals("true", true)
-                applyManualExposure()
+                if (manualExposureEnabled) {
+                    applyManualExposure()
+                } else {
+                    disableManualExposure()
+                }
             }
 
             "iso" -> {
@@ -622,8 +634,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun manualSensorRanges(): Triple<IntRange?, LongRange?, Boolean> {
-        val camera = currentCamera ?: return Triple(null, null, false)
+    private data class ManualSensorCapabilities(
+        val isoRange: IntRange?,
+        val shutterRange: LongRange?,
+        val aeOffSupported: Boolean,
+        val manualSensorFlag: Boolean,
+        val maxFrameDurationNs: Long?
+    ) {
+        val supported: Boolean
+            get() = isoRange != null && shutterRange != null &&
+                (manualSensorFlag || aeOffSupported)
+    }
+
+    private fun manualSensorCapabilities(): ManualSensorCapabilities {
+        val camera = currentCamera
+            ?: return ManualSensorCapabilities(null, null, false, false, null)
+
         return try {
             val info = Camera2CameraInfo.from(camera.cameraInfo)
             val iso = info.getCameraCharacteristic(
@@ -632,60 +658,135 @@ class MainActivity : AppCompatActivity() {
             val shutter = info.getCameraCharacteristic(
                 CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE
             )
+            val aeModes = info.getCameraCharacteristic(
+                CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES
+            ) ?: intArrayOf()
             val capabilities = info.getCameraCharacteristic(
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
             ) ?: intArrayOf()
-            val manualSupported = capabilities.contains(
-                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
-            ) && iso != null && shutter != null
+            val maxFrameDuration = info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION
+            )
 
-            Triple(
-                iso?.let { it.lower..it.upper },
-                shutter?.let { it.lower..it.upper },
-                manualSupported
+            ManualSensorCapabilities(
+                isoRange = iso?.let { it.lower..it.upper },
+                shutterRange = shutter?.let { it.lower..it.upper },
+                aeOffSupported = aeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF),
+                manualSensorFlag = capabilities.contains(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
+                ),
+                maxFrameDurationNs = maxFrameDuration
             )
         } catch (_: Exception) {
-            Triple(null, null, false)
+            ManualSensorCapabilities(null, null, false, false, null)
         }
     }
 
     private fun applyManualExposure(): Boolean {
         val camera = currentCamera ?: return false
         return try {
-            val (isoRange, shutterRange, supported) = manualSensorRanges()
+            val caps = manualSensorCapabilities()
+            val isoRange = caps.isoRange
+            val shutterRange = caps.shutterRange
+
+            if (!manualExposureEnabled || !caps.supported ||
+                isoRange == null || shutterRange == null
+            ) {
+                manualExposureEnabled = false
+                manualRequestApplied = false
+                manualControlStatus = "Exposição manual indisponível nesta câmera"
+                return false
+            }
+
+            manualIso = manualIso.coerceIn(isoRange.first, isoRange.last)
+            manualExposureTimeNs = manualExposureTimeNs.coerceIn(
+                shutterRange.first,
+                shutterRange.last
+            )
+
+            val targetFrameNs = 1_000_000_000L /
+                selectedQualityProfile.targetFps.coerceAtLeast(1)
+            var frameDurationNs = maxOf(targetFrameNs, manualExposureTimeNs)
+            caps.maxFrameDurationNs?.let {
+                frameDurationNs = frameDurationNs.coerceAtMost(it)
+            }
+            frameDurationNs = maxOf(frameDurationNs, manualExposureTimeNs)
+
             val control = Camera2CameraControl.from(camera.cameraControl)
             val options = CaptureRequestOptions.Builder()
-
-            if (manualExposureEnabled && supported && isoRange != null && shutterRange != null) {
-                manualIso = manualIso.coerceIn(isoRange.first, isoRange.last)
-                manualExposureTimeNs = manualExposureTimeNs.coerceIn(
-                    shutterRange.first,
-                    shutterRange.last
-                )
-                options.setCaptureRequestOption(
+                .setCaptureRequestOption(
                     CaptureRequest.CONTROL_AE_MODE,
                     CaptureRequest.CONTROL_AE_MODE_OFF
                 )
-                options.setCaptureRequestOption(
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_LOCK,
+                    false
+                )
+                .setCaptureRequestOption(
                     CaptureRequest.SENSOR_SENSITIVITY,
                     manualIso
                 )
-                options.setCaptureRequestOption(
+                .setCaptureRequestOption(
                     CaptureRequest.SENSOR_EXPOSURE_TIME,
                     manualExposureTimeNs
                 )
-            } else {
-                manualExposureEnabled = false
-                options.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AE_MODE,
-                    CaptureRequest.CONTROL_AE_MODE_ON
+                .setCaptureRequestOption(
+                    CaptureRequest.SENSOR_FRAME_DURATION,
+                    frameDurationNs
                 )
-            }
+                .build()
 
-            control.setCaptureRequestOptions(options.build())
+            manualRequestApplied = false
+            manualControlStatus =
+                "Aplicando manual: ISO $manualIso • ${manualExposureTimeNs / 1_000L} µs"
+
+            val future = control.setCaptureRequestOptions(options)
+            future.addListener({
+                try {
+                    future.get()
+                    manualRequestApplied = true
+                    manualControlStatus =
+                        "MANUAL ATIVO: ISO $manualIso • ${manualExposureTimeNs / 1_000L} µs"
+                } catch (ex: Exception) {
+                    manualRequestApplied = false
+                    manualExposureEnabled = false
+                    manualControlStatus =
+                        "Falha no modo manual: ${ex.cause?.message ?: ex.message ?: "Camera2"}"
+                }
+            }, ContextCompat.getMainExecutor(this))
+
             true
-        } catch (_: Exception) {
+        } catch (ex: Exception) {
             manualExposureEnabled = false
+            manualRequestApplied = false
+            manualControlStatus =
+                "Falha no modo manual: ${ex.message ?: "Camera2"}"
+            false
+        }
+    }
+
+    private fun disableManualExposure(): Boolean {
+        val camera = currentCamera ?: return false
+        return try {
+            val control = Camera2CameraControl.from(camera.cameraControl)
+            manualExposureEnabled = false
+            manualRequestApplied = false
+            manualControlStatus = "Voltando para exposição automática…"
+
+            val future = control.clearCaptureRequestOptions()
+            future.addListener({
+                try {
+                    future.get()
+                    manualControlStatus = "Exposição automática"
+                } catch (ex: Exception) {
+                    manualControlStatus =
+                        "Falha ao restaurar automático: ${ex.cause?.message ?: ex.message ?: "Camera2"}"
+                }
+            }, ContextCompat.getMainExecutor(this))
+            true
+        } catch (ex: Exception) {
+            manualControlStatus =
+                "Falha ao restaurar automático: ${ex.message ?: "Camera2"}"
             false
         }
     }
@@ -696,7 +797,10 @@ class MainActivity : AppCompatActivity() {
             val zoom = camera.cameraInfo.zoomState.value
             val exposure = camera.cameraInfo.exposureState
             val evRange = exposure.exposureCompensationRange
-            val (isoRange, shutterRange, manualSupported) = manualSensorRanges()
+            val manualCaps = manualSensorCapabilities()
+            val isoRange = manualCaps.isoRange
+            val shutterRange = manualCaps.shutterRange
+            val manualSupported = manualCaps.supported
             val currentZoom = zoom?.zoomRatio ?: 1f
             val minZoom = zoom?.minZoomRatio ?: 1f
             val maxZoom = zoom?.maxZoomRatio ?: 1f
@@ -717,6 +821,7 @@ class MainActivity : AppCompatActivity() {
                 ",\"maxEv\":${evRange.upper}" +
                 ",\"manualSupported\":$manualSupported" +
                 ",\"manual\":$manualExposureEnabled" +
+                ",\"manualApplied\":$manualRequestApplied" +
                 ",\"iso\":$manualIso" +
                 ",\"minIso\":${isoRange?.first ?: 50}" +
                 ",\"maxIso\":${isoRange?.last ?: 12800}" +

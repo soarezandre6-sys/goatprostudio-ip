@@ -317,8 +317,13 @@ class MjpegServer(
                     <label><input id="audioEnabled" type="checkbox" onchange="cmd('audio',this.checked?'1':'0')"> Áudio do celular</label>
 
                     <div class="muted" style="color:#F2B620;font-weight:bold;margin-top:16px;margin-bottom:6px">CONTROLES DA CÂMERA</div>
+
+                    <label>Câmera / lente</label>
+                    <select id="cameraLens" onchange="cmd('cameraLens',this.value)"></select>
+                    <div class="rangeLimits" id="cameraLensInfo">Detectando lentes expostas pelo Android…</div>
+
                     <div class="row">
-                      <button onclick="cmd('switch')">Trocar câmera</button>
+                      <button onclick="cmd('switch')">Próxima câmera / lente</button>
                       <button onclick="cmd('torch')">Lanterna</button>
                       <button class="secondary" onclick="cmd('focus')">Auto foco central</button>
                     </div>
@@ -448,6 +453,26 @@ class MjpegServer(
                   await cmd('frameDurationUs',String(us));
                 }
 
+                function applyCameraLensOptions(csv,current){
+                  const select=document.getElementById('cameraLens');
+                  const rows=String(csv||'').split(';').map(v=>v.trim()).filter(Boolean);
+                  select.innerHTML='';
+                  rows.forEach(row=>{
+                    const sep=row.indexOf('|');
+                    const key=sep>=0?row.slice(0,sep):row;
+                    const label=sep>=0?row.slice(sep+1):row;
+                    const option=document.createElement('option');
+                    option.value=key;
+                    option.textContent=label;
+                    select.appendChild(option);
+                  });
+                  if(current) select.value=current;
+                  document.getElementById('cameraLensInfo').textContent=
+                    rows.length>1
+                      ? rows.length+' câmera(s)/lente(s) disponíveis'
+                      : (rows.length===1?'1 câmera/lente disponível':'Nenhuma lente adicional exposta');
+                }
+
                 function applyResolutionSupport(csv,current){
                   const supported=String(csv||'').split(',').map(v=>v.trim()).filter(Boolean);
                   const select=document.getElementById('resolution');
@@ -556,6 +581,10 @@ class MjpegServer(
                   try{
                     const s=await fetch('/camera/state?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());
                     if(!s.available){document.getElementById('status').textContent='Câmera indisponível';return;}
+                    applyCameraLensOptions(
+                      s.cameraOptionsCsv||'',
+                      s.cameraKey||''
+                    );
                     applyResolutionSupport(
                       s.supportedResolutionsCsv||'HD,FHD',
                       s.resolution||'FHD'

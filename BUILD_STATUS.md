@@ -110,3 +110,18 @@ Branch: `build-5-alpha`
 - testar orientação horizontal e vertical;
 - confirmar vídeo automático no GOAT PRO Studio;
 - medir estabilidade antes de considerar 4K.
+
+
+### Correções após teste da Build 5
+- rotação automática agora usa o sensor de orientação do aparelho em tempo real, mesmo com a interface do app mantida em portrait;
+- CameraX recebe atualização dinâmica de targetRotation no preview e no ImageAnalysis;
+- modos manuais 90°/180°/270° continuam disponíveis e ignoram a rotação automática;
+- removida a lógica de ignorar a primeira troca dos seletores;
+- perfis de qualidade ficaram mais distintos e efetivos:
+  - baixa latência: Q62 / 30 FPS;
+  - equilibrado: Q80 / 30 FPS;
+  - alta qualidade: Q90 / 25 FPS;
+  - máxima qualidade: Q96 / 20 FPS;
+- ao trocar o perfil durante transmissão, o app confirma visualmente que o perfil foi aplicado.
+
+APK ainda não recompilado após essas correções.

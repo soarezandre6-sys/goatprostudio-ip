@@ -482,9 +482,15 @@ class RtspH264Server(
 
             TransportMode.TCP -> {
                 synchronized(client.writeLock) {
-                    client.output.write('
+                    client.output.write(0x24)
+                    client.output.write(client.tcpRtpChannel and 0xff)
+                    client.output.write((packet.size ushr 8) and 0xff)
+                    client.output.write(packet.size and 0xff)
+                    client.output.write(packet)
+                }
+            }
 
-            else -> Unit
+            TransportMode.NONE -> Unit
         }
     }
 

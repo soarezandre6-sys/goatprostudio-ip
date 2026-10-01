@@ -350,3 +350,14 @@ Branch: `build-9-alpha`
 - H.264 não força Baseline acima de Full HD, permitindo que o codec escolha perfil/nível compatível com alta resolução;
 - bitrate H.264 limitado de forma conservadora: teto 14 Mbps em 2K e 18 Mbps em 4K;
 - nenhuma nova build do GOAT PRO Studio necessária para este teste manual.
+
+
+### APK Build 9 gerado
+- workflow run: 36893005284 (#20);
+- conclusão: success;
+- artifact: goat-pro-ip-build-9-debug;
+- artifact id: 11177307366;
+- artifact digest: sha256:50f905e87773ee024d7c6fdc0748d2302ec3fb23fbf860b2653af5a56a69ec2b;
+- APK extraído: app-debug.apk;
+- APK SHA-256: 617b3a326f4336048805d4a1a5d96d890c9e7d1a68e96ead94b4812878af8d72;
+- tamanho APK: 4.806.815 bytes.

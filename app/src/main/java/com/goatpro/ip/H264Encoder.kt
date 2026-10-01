@@ -71,6 +71,8 @@ class H264Encoder(
                 val baselineSupported = caps.profileLevels.any {
                     it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
                 }
+                val fullHdOrLower =
+                    safeWidth.toLong() * safeHeight.toLong() <= 1920L * 1080L
 
                 val format = MediaFormat.createVideoFormat(
                     MediaFormat.MIMETYPE_VIDEO_AVC,
@@ -109,7 +111,7 @@ class H264Encoder(
                     ) {
                         runCatching { setInteger("low-latency", 1) }
                     }
-                    if (baselineSupported) {
+                    if (baselineSupported && fullHdOrLower) {
                         runCatching {
                             setInteger(
                                 MediaFormat.KEY_PROFILE,
@@ -303,11 +305,19 @@ class H264Encoder(
 
     companion object {
         fun recommendedBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
-            val pixelsPerSecond = width.toLong() * height.toLong() * max(5, fps)
+            val pixels = width.toLong() * height.toLong()
+            val pixelsPerSecond = pixels * max(5, fps)
             val qualityFactor = 0.11 + (quality.coerceIn(1, 100) / 100.0) * 0.16
-            return (pixelsPerSecond * qualityFactor)
-                .toLong()
-                .coerceIn(1_000_000L, 24_000_000L)
+            val calculated = (pixelsPerSecond * qualityFactor).toLong()
+
+            val ceiling = when {
+                pixels >= 3840L * 2160L -> 18_000_000L
+                pixels >= 2560L * 1440L -> 14_000_000L
+                else -> 12_000_000L
+            }
+
+            return calculated
+                .coerceIn(1_000_000L, ceiling)
                 .toInt()
         }
     }

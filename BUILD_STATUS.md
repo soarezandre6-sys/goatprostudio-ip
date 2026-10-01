@@ -381,3 +381,16 @@ Branch: `build-10-alpha`
 - resoluções 720p/1080p/2K/4K passam a ser recalculadas para a lente atualmente selecionada;
 - versão 0.10.0-alpha;
 - workflow preparado, mas APK ainda não gerado.
+
+
+### Revisão visual da Build 10
+- interface Android redesenhada sem alterar o pipeline de câmera/transmissão;
+- cartões com cantos arredondados, bordas sutis e elevação;
+- preview em moldura arredondada elevada;
+- botões secundários arredondados e botão principal com acabamento em gradiente;
+- campos/spinners com fundo escuro, borda e tipografia própria;
+- cabeçalho com selo circular dourado e bode sem moldura quadrada preta;
+- launcher convertido para adaptive icon do Android, permitindo recorte correto circular/arredondado pelo aparelho;
+- removida a borda/quadrado preto que contornava o bode no ícone antigo;
+- ícone técnico do launcher e marca usada dentro do app agora são separados;
+- Build 10 segue com múltiplas lentes + 2K/4K experimentais + H.264 baixa latência.

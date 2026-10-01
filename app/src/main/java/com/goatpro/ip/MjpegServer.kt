@@ -307,6 +307,16 @@ class MjpegServer(
                     <label>Compensação de exposição (EV) · <span class="value" id="evText">0</span></label>
                     <input id="ev" type="range" min="-4" max="4" step="1" value="0" oninput="evText.textContent=this.value" onchange="cmd('ev',this.value)">
 
+                    <label><input id="manualFocus" type="checkbox" onchange="cmd('focusMode',this.checked?'manual':'auto')"> Foco manual</label>
+                    <label class="rangeHead">
+                      <span>Distância de foco</span>
+                      <span class="rangeValue" id="focusText">Automático</span>
+                    </label>
+                    <input id="focusDistance" type="range" min="0" max="1000" step="1" value="0"
+                           oninput="previewFocus(this.value)"
+                           onchange="applyFocus(this.value)">
+                    <div class="rangeLimits" id="focusLimits">Longe / ∞  ←→  Perto / macro</div>
+
                     <label><input id="manual" type="checkbox" onchange="cmd('manual',this.checked?'1':'0')"> Exposição manual (quando suportada)</label>
 
                     <label class="rangeHead">
@@ -360,6 +370,36 @@ class MjpegServer(
                   if(v>=1000)return (v/1000).toFixed(1)+' ms';
                   return Math.round(v)+' µs';
                 }
+                let maxFocusDiopters=0;
+
+                function sliderToFocusDiopters(pos){
+                  const t=clamp(Number(pos)/1000,0,1);
+                  return t*Math.max(0,Number(maxFocusDiopters)||0);
+                }
+                function focusDioptersToSlider(diopters){
+                  const max=Math.max(0,Number(maxFocusDiopters)||0);
+                  if(max<=0)return 0;
+                  return Math.round(1000*clamp((Number(diopters)||0)/max,0,1));
+                }
+                function formatFocus(diopters){
+                  const d=Math.max(0,Number(diopters)||0);
+                  if(d<0.01)return '∞ / longe';
+                  const meters=1/d;
+                  if(meters>=10)return 'longe · '+meters.toFixed(0)+' m';
+                  if(meters>=1)return meters.toFixed(1)+' m';
+                  return Math.round(meters*100)+' cm';
+                }
+                function previewFocus(pos){
+                  const d=sliderToFocusDiopters(pos);
+                  document.getElementById('focusText').textContent=formatFocus(d);
+                }
+                async function applyFocus(pos){
+                  const d=sliderToFocusDiopters(pos);
+                  document.getElementById('manualFocus').checked=true;
+                  document.getElementById('focusText').textContent=formatFocus(d);
+                  await cmd('focusDistance',String(d));
+                }
+
                 function previewShutter(pos){
                   const us=sliderToShutterUs(pos);
                   document.getElementById('shutterText').textContent=formatShutter(us)+' · '+us+' µs';
@@ -376,6 +416,9 @@ class MjpegServer(
                     const r=await fetch(q,{cache:'no-store'});
                     const j=await r.json();
                     document.getElementById('status').textContent=j.message||'Controle aplicado';
+                    if(action==='focusMode'){
+                      document.getElementById('focusDistance').disabled=(value!=='manual');
+                    }
                     setTimeout(loadState,120);
                   }catch(e){document.getElementById('status').textContent='Falha: '+e;}
                 }
@@ -392,6 +435,21 @@ class MjpegServer(
                     z.min=s.minZoom;z.max=s.maxZoom;z.value=s.zoom;document.getElementById('zoomText').textContent=Number(s.zoom).toFixed(1)+'×';
                     const ev=document.getElementById('ev');
                     ev.min=s.minEv;ev.max=s.maxEv;ev.value=s.ev;document.getElementById('evText').textContent=s.ev;
+
+                    maxFocusDiopters=Math.max(0,Number(s.maxFocusDiopters||0));
+                    const mf=document.getElementById('manualFocus');
+                    const fd=document.getElementById('focusDistance');
+                    mf.checked=!!s.manualFocus;
+                    mf.disabled=!s.manualFocusSupported;
+                    fd.disabled=!s.manualFocusSupported || !s.manualFocus;
+                    fd.value=focusDioptersToSlider(Number(s.focusDiopters||0));
+                    document.getElementById('focusText').textContent=
+                      s.manualFocus ? formatFocus(Number(s.focusDiopters||0)) : 'Automático';
+                    document.getElementById('focusLimits').textContent=
+                      s.manualFocusSupported
+                        ? 'Longe / ∞  ←→  Perto / macro · limite da lente: '+maxFocusDiopters.toFixed(2)+' D'
+                        : 'Foco manual não suportado por esta câmera';
+
                     document.getElementById('manual').checked=!!s.manual;
                     const iso=document.getElementById('iso');
                     const minIso=Number(s.minIso||50), maxIso=Number(s.maxIso||12800), curIso=Number(s.iso||minIso);

@@ -460,3 +460,22 @@ Branch: `release-1.0.0-goat-cam`
 - múltiplas lentes, Full HD, 2K/4K experimentais, MJPEG e H.264/RTSP preservados;
 - saída release preparada para APK e Android App Bundle (AAB);
 - assinatura de produção não será armazenada no GitHub.
+
+
+### GOAT Cam 1.0.0 — release assinada final
+- workflow run: 36909497897 (#2);
+- conclusão: success;
+- head commit: 6727c9f366745b6248b6698d2a7b5373264ae18c;
+- artifact público: goat-cam-release-1.0.0 (id 11185284126);
+- artifact privado temporário da chave: goat-cam-release-1.0.0-signing-backup (id 11185948833, retenção de 1 dia);
+- APK: GOAT-Cam-1.0.0-Release.apk;
+- APK SHA-256: 9f7ef4dae413933aaf672e1931f59907a6ae967156c39569a49a490acca2a201;
+- assinatura APK verificada: v2=true, v3=true;
+- AAB Play: GOAT-Cam-1.0.0-Play.aab;
+- AAB SHA-256: 3988f2ee069b12f40bf44f3b744984a5ee7f4e31f6be0c8a26f938d40a0ada8c;
+- assinatura AAB: jar verified;
+- certificado SHA-256: F4:14:95:E0:CC:F3:55:A9:8C:DF:8D:28:B3:3A:81:1A:1F:EA:B4:12:EB:D2:F9:7F:66:50:92:69:97:FF:A5:0C;
+- chave privada e senha NÃO foram gravadas no repositório;
+- package ID preservado: com.goatpro.ip;
+- targetSdk/compileSdk: 36;
+- versionCode 100 / versionName 1.0.0.

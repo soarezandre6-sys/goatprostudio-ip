@@ -11,8 +11,8 @@ android {
         applicationId = "com.goatpro.ip"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.6.0-alpha"
+        versionCode = 7
+        versionName = "0.7.0-alpha"
     }
 
     buildTypes {

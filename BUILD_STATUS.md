@@ -337,3 +337,16 @@ Branch: `build-9-alpha`
 - nenhuma alteração no GOAT PRO Studio nesta rodada;
 - versão 0.9.0-alpha;
 - APK ainda não compilado; aguarda autorização explícita.
+
+
+### Testes 2K / 4K adicionados à Build 9
+- 2K/QHD: 2560×1440, exibido somente quando a câmera anuncia exatamente esse modo em YUV;
+- 4K/UHD: 3840×2160, exibido somente quando a câmera anuncia exatamente esse modo em YUV;
+- modos experimentais usam fallback NONE para impedir que 4K/2K sejam selecionados mas transmitam silenciosamente em resolução inferior;
+- ao entrar em 2K: perfil experimental automático Q58 / 15 FPS;
+- ao entrar em 4K: perfil experimental automático Q50 / 10 FPS;
+- 1080p continua padrão;
+- painel web também mostra/desabilita resoluções conforme suporte real informado pelo APK;
+- H.264 não força Baseline acima de Full HD, permitindo que o codec escolha perfil/nível compatível com alta resolução;
+- bitrate H.264 limitado de forma conservadora: teto 14 Mbps em 2K e 18 Mbps em 4K;
+- nenhuma nova build do GOAT PRO Studio necessária para este teste manual.

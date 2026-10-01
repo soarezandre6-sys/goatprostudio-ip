@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.GoatProIP" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#05070A</item>
+        <item name="android:navigationBarColor">#05070A</item>
+        <item name="android:windowBackground">#05070A</item>
+        <item name="colorAccent">#F2B620</item>
+    </style>
+</resources>

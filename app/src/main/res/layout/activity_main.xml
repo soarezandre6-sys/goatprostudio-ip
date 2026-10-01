@@ -283,7 +283,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 9: H.264 otimizado para baixa latência + Full HD real + painel avançado."
+            android:text="Build 9: H.264 baixa latência + 2K/4K experimentais + painel avançado."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

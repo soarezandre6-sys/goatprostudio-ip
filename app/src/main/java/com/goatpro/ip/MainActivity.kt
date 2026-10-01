@@ -833,6 +833,145 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun availableApertures(): FloatArray {
+        val camera = currentCamera ?: return floatArrayOf()
+        return try {
+            Camera2CameraInfo.from(camera.cameraInfo)
+                .getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES
+                ) ?: floatArrayOf()
+        } catch (_: Exception) {
+            floatArrayOf()
+        }
+    }
+
+    private fun availableFilterDensities(): FloatArray {
+        val camera = currentCamera ?: return floatArrayOf()
+        return try {
+            Camera2CameraInfo.from(camera.cameraInfo)
+                .getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_FILTER_DENSITIES
+                ) ?: floatArrayOf()
+        } catch (_: Exception) {
+            floatArrayOf()
+        }
+    }
+
+    private fun whiteBalanceModeFromName(name: String): Int? = when (name.uppercase()) {
+        "AUTO" -> CaptureRequest.CONTROL_AWB_MODE_AUTO
+        "INCANDESCENT" -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT
+        "FLUORESCENT" -> CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
+        "WARM_FLUORESCENT" -> CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT
+        "DAYLIGHT" -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT
+        "CLOUDY_DAYLIGHT" -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
+        "TWILIGHT" -> CaptureRequest.CONTROL_AWB_MODE_TWILIGHT
+        "SHADE" -> CaptureRequest.CONTROL_AWB_MODE_SHADE
+        else -> null
+    }
+
+    private fun whiteBalanceName(mode: Int): String = when (mode) {
+        CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT -> "INCANDESCENT"
+        CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT -> "FLUORESCENT"
+        CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT -> "WARM_FLUORESCENT"
+        CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT -> "DAYLIGHT"
+        CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> "CLOUDY_DAYLIGHT"
+        CaptureRequest.CONTROL_AWB_MODE_TWILIGHT -> "TWILIGHT"
+        CaptureRequest.CONTROL_AWB_MODE_SHADE -> "SHADE"
+        else -> "AUTO"
+    }
+
+    private fun antibandingModeFromName(name: String): Int? = when (name.uppercase()) {
+        "OFF" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF
+        "50HZ" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+        "60HZ" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+        "AUTO" -> CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+        else -> null
+    }
+
+    private fun antibandingName(mode: Int): String = when (mode) {
+        CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF -> "OFF"
+        CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ -> "50HZ"
+        CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ -> "60HZ"
+        else -> "AUTO"
+    }
+
+    private fun sceneModeFromName(name: String): Int? = when (name.uppercase()) {
+        "AUTO" -> CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+        "ACTION" -> CaptureRequest.CONTROL_SCENE_MODE_ACTION
+        "PORTRAIT" -> CaptureRequest.CONTROL_SCENE_MODE_PORTRAIT
+        "LANDSCAPE" -> CaptureRequest.CONTROL_SCENE_MODE_LANDSCAPE
+        "NIGHT" -> CaptureRequest.CONTROL_SCENE_MODE_NIGHT
+        "NIGHT_PORTRAIT" -> CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT
+        "SPORTS" -> CaptureRequest.CONTROL_SCENE_MODE_SPORTS
+        else -> null
+    }
+
+    private fun sceneModeName(mode: Int): String = when (mode) {
+        CaptureRequest.CONTROL_SCENE_MODE_ACTION -> "ACTION"
+        CaptureRequest.CONTROL_SCENE_MODE_PORTRAIT -> "PORTRAIT"
+        CaptureRequest.CONTROL_SCENE_MODE_LANDSCAPE -> "LANDSCAPE"
+        CaptureRequest.CONTROL_SCENE_MODE_NIGHT -> "NIGHT"
+        CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT -> "NIGHT_PORTRAIT"
+        CaptureRequest.CONTROL_SCENE_MODE_SPORTS -> "SPORTS"
+        else -> "AUTO"
+    }
+
+    private fun applyAutomaticSensorControls(): Boolean {
+        val camera = currentCamera ?: return false
+        return try {
+            val builder = CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    selectedWhiteBalanceMode
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                    selectedAntibandingMode
+                )
+
+            if (selectedSceneMode == CaptureRequest.CONTROL_SCENE_MODE_DISABLED) {
+                builder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_MODE,
+                    CaptureRequest.CONTROL_MODE_AUTO
+                )
+            } else {
+                builder
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_MODE,
+                        CaptureRequest.CONTROL_MODE_USE_SCENE_MODE
+                    )
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_SCENE_MODE,
+                        selectedSceneMode
+                    )
+            }
+
+            Camera2CameraControl.from(camera.cameraControl)
+                .addCaptureRequestOptions(builder.build())
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun applyLensControls(): Boolean {
+        val camera = currentCamera ?: return false
+        return try {
+            val builder = CaptureRequestOptions.Builder()
+            selectedAperture?.let {
+                builder.setCaptureRequestOption(CaptureRequest.LENS_APERTURE, it)
+            }
+            selectedFilterDensity?.let {
+                builder.setCaptureRequestOption(CaptureRequest.LENS_FILTER_DENSITY, it)
+            }
+            Camera2CameraControl.from(camera.cameraControl)
+                .addCaptureRequestOptions(builder.build())
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun manualFocusMaxDiopters(): Float {
         val camera = currentCamera ?: return 0f
         return try {

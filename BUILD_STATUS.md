@@ -47,3 +47,25 @@ Estado atual: **APK de teste gerado com sucesso e pronto para validação em apa
 
 ## Regra de organização
 Este repositório é exclusivo do GOAT PRO IP. O projeto GOAT PRO Studio / Build 561 permanece separado no repositório anterior.
+
+
+## Build 2 — em desenvolvimento
+Branch: `build-2-alpha`
+
+### Implementado até agora
+- versão Android atualizada para `0.2.0-alpha`;
+- preview 16:9 responsivo herdado da correção pós-Build 1;
+- áudio opcional com captura do microfone;
+- endpoint local de áudio PCM em `/audio.pcm`;
+- controle de lanterna quando a câmera selecionada possui flash;
+- status de conexão com contagem de clientes de vídeo;
+- painel de vínculo com o GOAT PRO Studio;
+- melhorias no encerramento de clientes e limpeza do servidor.
+
+### Mantido para Build 3
+- descoberta automática do GOAT PRO IP na mesma rede;
+- conexão sem digitação manual de IP;
+- integração nativa de descoberta no GOAT PRO Studio.
+
+### Regra de compilação
+A branch `build-2-alpha` não dispara o workflow automático. Gerar APK somente após autorização do usuário.

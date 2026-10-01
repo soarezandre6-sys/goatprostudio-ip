@@ -306,3 +306,34 @@ Após comparação visual com o painel do IP Webcam Pro, a Build 8 passa a inclu
 - controles de lente/sensor preservados ao alternar entre exposição/foco automático e manual.
 
 A Build 8 ainda não foi compilada após essas alterações.
+
+
+## Build 9 — H.264 baixa latência
+Branch: `build-9-alpha`
+
+### Resultado real da Build 8
+- H.264/RTSP: qualidade visual excelente;
+- H.264/RTSP: mais latência e mais travamento que o MJPEG automático;
+- MJPEG já validado em Full HD vertical real perto de 20 FPS.
+
+### Diagnóstico
+- encoder H.264 da Build 8 usava VBR;
+- B-frames/reordenação não eram explicitamente desativados;
+- modo low-latency do MediaCodec não era solicitado;
+- RTSP sobre TCP fazia flush a cada pacote RTP fragmentado, aumentando overhead e possibilidade de travamento;
+- GOAT PRO Studio ainda recebe RTSP pelo FFmpeg/OpenCV, que pode acrescentar buffer próprio.
+
+### Correções aplicadas no APK
+- CBR quando suportado pelo encoder;
+- prioridade realtime e operating rate alinhado ao FPS;
+- B-frames desativados;
+- perfil AVC Baseline quando suportado;
+- low-latency do MediaCodec ativado quando o hardware expõe suporte;
+- SPS/PPS repetidos em IDR para entrada mais rápida do decoder;
+- socket RTSP TCP com buffer menor e TCP_NODELAY;
+- flush RTSP reduzido de cada pacote RTP para uma vez por access unit/quadro.
+
+### Processo
+- nenhuma alteração no GOAT PRO Studio nesta rodada;
+- versão 0.9.0-alpha;
+- APK ainda não compilado; aguarda autorização explícita.

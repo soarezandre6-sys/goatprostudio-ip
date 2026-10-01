@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Size
+import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -20,6 +21,9 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -38,15 +42,30 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
     private lateinit var resolutionSpinner: Spinner
+    private lateinit var qualitySpinner: Spinner
+    private lateinit var rotationSpinner: Spinner
 
     private lateinit var cameraExecutor: ExecutorService
     private var currentCamera: Camera? = null
     private var lensFacing = CameraSelector.LENS_FACING_BACK
+
+    @Volatile
     private var selectedPreset = ResolutionPreset.FHD
-    private var ignoreFirstSpinnerCallback = true
+
+    @Volatile
+    private var selectedQualityProfile = QualityProfile.BALANCED
+
+    @Volatile
+    private var selectedRotationMode = RotationMode.AUTO
+
+    private var ignoreFirstResolutionCallback = true
+    private var ignoreFirstQualityCallback = true
+    private var ignoreFirstRotationCallback = true
     private var lastEncodedFrameNs = 0L
     private var torchEnabled = false
     private var audioEnabled = false
+    private var actualStreamWidth = 0
+    private var actualStreamHeight = 0
 
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
@@ -111,10 +130,14 @@ class MainActivity : AppCompatActivity() {
         audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
+        qualitySpinner = findViewById(R.id.qualitySpinner)
+        rotationSpinner = findViewById(R.id.rotationSpinner)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         applyPreviewAspectRatio()
         setupResolutionSelector()
+        setupQualitySelector()
+        setupRotationSelector()
         refreshAddress()
         updateStreamInfo()
         updateConnectionStatus(0)
@@ -166,22 +189,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupResolutionSelector() {
-        val labels = ResolutionPreset.entries.map { it.label }
         resolutionSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            labels
+            ResolutionPreset.entries.map { it.label }
         )
         resolutionSpinner.setSelection(ResolutionPreset.entries.indexOf(selectedPreset))
         resolutionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val newPreset = ResolutionPreset.entries[position]
-                if (ignoreFirstSpinnerCallback) {
-                    ignoreFirstSpinnerCallback = false
+                if (ignoreFirstResolutionCallback) {
+                    ignoreFirstResolutionCallback = false
                     return
                 }
                 if (newPreset != selectedPreset) {
                     selectedPreset = newPreset
+                    actualStreamWidth = 0
+                    actualStreamHeight = 0
+                    lastEncodedFrameNs = 0L
                     updateStreamInfo()
                     applyPreviewAspectRatio()
                     if (ContextCompat.checkSelfPermission(
@@ -198,20 +223,85 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupQualitySelector() {
+        qualitySpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            QualityProfile.entries.map { it.label }
+        )
+        qualitySpinner.setSelection(QualityProfile.entries.indexOf(selectedQualityProfile))
+        qualitySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val profile = QualityProfile.entries[position]
+                if (ignoreFirstQualityCallback) {
+                    ignoreFirstQualityCallback = false
+                    return
+                }
+                if (profile != selectedQualityProfile) {
+                    selectedQualityProfile = profile
+                    lastEncodedFrameNs = 0L
+                    updateStreamInfo()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun setupRotationSelector() {
+        rotationSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            RotationMode.entries.map { it.label }
+        )
+        rotationSpinner.setSelection(RotationMode.entries.indexOf(selectedRotationMode))
+        rotationSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val mode = RotationMode.entries[position]
+                if (ignoreFirstRotationCallback) {
+                    ignoreFirstRotationCallback = false
+                    return
+                }
+                if (mode != selectedRotationMode) {
+                    selectedRotationMode = mode
+                    actualStreamWidth = 0
+                    actualStreamHeight = 0
+                    lastEncodedFrameNs = 0L
+                    updateStreamInfo()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
     private fun startCamera() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             val provider = providerFuture.get()
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             val size = selectedPreset.size
+            val targetRotation = previewView.display?.rotation ?: Surface.ROTATION_0
+
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        size,
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                    )
+                )
+                .build()
 
             val preview = Preview.Builder()
-                .setTargetResolution(size)
+                .setResolutionSelector(resolutionSelector)
+                .setTargetRotation(targetRotation)
                 .build()
                 .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
             val analysis = ImageAnalysis.Builder()
-                .setTargetResolution(size)
+                .setResolutionSelector(resolutionSelector)
+                .setTargetRotation(targetRotation)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { useCase ->
@@ -219,12 +309,27 @@ class MainActivity : AppCompatActivity() {
                         try {
                             if (!server.isRunning()) return@setAnalyzer
 
+                            val profile = selectedQualityProfile
                             val now = System.nanoTime()
-                            if (now - lastEncodedFrameNs < FRAME_INTERVAL_NS) return@setAnalyzer
+                            val frameIntervalNs = 1_000_000_000L / profile.targetFps
+                            if (now - lastEncodedFrameNs < frameIntervalNs) return@setAnalyzer
                             lastEncodedFrameNs = now
 
-                            ImageUtils.imageProxyToJpeg(image, selectedPreset.jpegQuality)
-                                ?.let(server::offerFrame)
+                            val rotation = selectedRotationMode.resolve(image.imageInfo.rotationDegrees)
+                            val encoded = ImageUtils.imageProxyToJpeg(
+                                image = image,
+                                quality = profile.jpegQuality,
+                                rotationDegrees = rotation
+                            )
+
+                            if (encoded != null) {
+                                server.offerFrame(encoded.bytes)
+                                if (encoded.width != actualStreamWidth || encoded.height != actualStreamHeight) {
+                                    actualStreamWidth = encoded.width
+                                    actualStreamHeight = encoded.height
+                                    runOnUiThread { updateStreamInfo() }
+                                }
+                            }
                         } finally {
                             image.close()
                         }
@@ -305,6 +410,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         refreshAddress()
+        lastEncodedFrameNs = 0L
         server.start()
         server.setAudioEnabled(audioEnabled)
         if (audioEnabled && !audioCapture.start()) {
@@ -371,7 +477,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStreamInfo() {
-        streamInfoText.text = "${selectedPreset.label} • alvo 30 FPS • MJPEG / Wi-Fi local"
+        val profile = selectedQualityProfile
+        val dimensions = if (actualStreamWidth > 0 && actualStreamHeight > 0) {
+            "${actualStreamWidth}×${actualStreamHeight}"
+        } else {
+            selectedPreset.label
+        }
+        streamInfoText.text =
+            "$dimensions • ${profile.targetFps} FPS • JPEG Q${profile.jpegQuality} • ${profile.shortLabel} • ${selectedRotationMode.shortLabel}"
     }
 
     private fun copyAddressToClipboard() {
@@ -405,15 +518,59 @@ class MainActivity : AppCompatActivity() {
 
     private enum class ResolutionPreset(
         val label: String,
-        val size: Size,
-        val jpegQuality: Int
+        val size: Size
     ) {
-        HD("720p", Size(1280, 720), 76),
-        FHD("1080p", Size(1920, 1080), 70)
+        HD("720p", Size(1280, 720)),
+        FHD("1080p", Size(1920, 1080))
+    }
+
+    private enum class QualityProfile(
+        val label: String,
+        val shortLabel: String,
+        val jpegQuality: Int,
+        val targetFps: Int
+    ) {
+        LOW_LATENCY(
+            "Baixa latência • Q78 • 30 FPS",
+            "Baixa latência",
+            78,
+            30
+        ),
+        BALANCED(
+            "Equilibrado • Q86 • 30 FPS",
+            "Equilibrado",
+            86,
+            30
+        ),
+        HIGH_QUALITY(
+            "Alta qualidade • Q92 • 24 FPS",
+            "Alta qualidade",
+            92,
+            24
+        ),
+        MAX_QUALITY(
+            "Máxima qualidade • Q95 • 20 FPS",
+            "Máxima qualidade",
+            95,
+            20
+        )
+    }
+
+    private enum class RotationMode(
+        val label: String,
+        val shortLabel: String,
+        val offsetDegrees: Int
+    ) {
+        AUTO("Automático", "Rotação auto", 0),
+        ROTATE_90("Girar 90° para direita", "Rotação +90°", 90),
+        ROTATE_180("Girar 180°", "Rotação +180°", 180),
+        ROTATE_270("Girar 270° / esquerda", "Rotação +270°", 270);
+
+        fun resolve(sensorRotationDegrees: Int): Int =
+            ((sensorRotationDegrees + offsetDegrees) % 360 + 360) % 360
     }
 
     companion object {
-        private const val FRAME_INTERVAL_NS = 33_333_333L
         private const val PREVIEW_HEIGHT_RATIO = 9f / 16f
     }
 }

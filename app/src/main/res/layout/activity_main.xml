@@ -173,6 +173,21 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
+                android:text="Câmera / lente"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Spinner
+                android:id="@+id/cameraLensSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:backgroundTint="@color/gold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
                 android:text="Resolução"
                 android:textColor="@color/muted"
                 android:textSize="12sp" />
@@ -220,7 +235,7 @@
                 android:layout_height="48dp"
                 android:layout_marginTop="10dp"
                 android:backgroundTint="@color/panel_2"
-                android:text="Trocar câmera (traseira / frontal)"
+                android:text="Próxima câmera / lente"
                 android:textColor="@color/text" />
 
             <Button
@@ -283,7 +298,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 9: H.264 baixa latência + 2K/4K experimentais + painel avançado."
+            android:text="Build 10: múltiplas lentes + H.264 baixa latência + 2K/4K experimentais."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

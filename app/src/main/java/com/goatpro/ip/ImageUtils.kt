@@ -4,52 +4,189 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import androidx.camera.core.ImageProxy
-import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
+import java.io.ByteArrayOutputStream
 
 object ImageUtils {
     private const val TARGET_ASPECT = 16f / 9f
 
-    fun imageProxyToJpeg(image: ImageProxy, quality: Int = 72): ByteArray? {
+    data class JpegFrame(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int
+    )
+
+    fun imageProxyToJpeg(
+        image: ImageProxy,
+        quality: Int = 85,
+        rotationDegrees: Int = image.imageInfo.rotationDegrees
+    ): JpegFrame? {
         if (image.format != ImageFormat.YUV_420_888) return null
 
         val nv21 = yuv420ToNv21(image)
-        val output = ByteArrayOutputStream()
         val crop = centeredLandscape16x9Crop(image.width, image.height)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+        val cropped = cropNv21(nv21, image.width, image.height, crop)
 
-        val ok = yuvImage.compressToJpeg(crop, quality, output)
-        return if (ok) output.toByteArray() else null
+        val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
+        val rotated = rotateNv21(
+            cropped.bytes,
+            cropped.width,
+            cropped.height,
+            normalizedRotation
+        )
+
+        val output = ByteArrayOutputStream(
+            (rotated.width * rotated.height / 3).coerceAtLeast(64 * 1024)
+        )
+        val yuvImage = YuvImage(
+            rotated.bytes,
+            ImageFormat.NV21,
+            rotated.width,
+            rotated.height,
+            null
+        )
+
+        val ok = yuvImage.compressToJpeg(
+            Rect(0, 0, rotated.width, rotated.height),
+            quality.coerceIn(55, 97),
+            output
+        )
+        return if (ok) {
+            JpegFrame(output.toByteArray(), rotated.width, rotated.height)
+        } else {
+            null
+        }
     }
 
+    private data class Nv21Frame(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int
+    )
+
     /**
-     * CameraX ImageAnalysis may negotiate a 4:3 YUV buffer even when 1080p/720p was
-     * requested. GOAT PRO IP always exposes a landscape 16:9 MJPEG stream, so crop the
-     * sensor buffer centrally instead of forwarding the sensor aspect ratio to the PC.
-     *
-     * JPEG/NV21 crop coordinates are kept even to preserve chroma alignment.
+     * CameraX can negotiate a 4:3 analysis buffer even when FHD/HD is requested.
+     * Crop centrally to 16:9 before encoding so the stream never becomes square-ish.
      */
     private fun centeredLandscape16x9Crop(width: Int, height: Int): Rect {
-        if (width <= 0 || height <= 0 || width < height) {
-            return Rect(0, 0, width, height)
-        }
+        if (width <= 0 || height <= 0) return Rect(0, 0, width, height)
 
-        val currentAspect = width.toFloat() / height.toFloat()
-        var cropWidth = width
-        var cropHeight = height
+        var cropWidth = width and -2
+        var cropHeight = height and -2
+        val currentAspect = cropWidth.toFloat() / cropHeight.toFloat()
 
         if (currentAspect < TARGET_ASPECT) {
-            cropHeight = (width / TARGET_ASPECT).roundToInt()
+            cropHeight = (cropWidth / TARGET_ASPECT).roundToInt().coerceAtMost(cropHeight) and -2
         } else if (currentAspect > TARGET_ASPECT) {
-            cropWidth = (height * TARGET_ASPECT).roundToInt()
+            cropWidth = (cropHeight * TARGET_ASPECT).roundToInt().coerceAtMost(cropWidth) and -2
         }
 
-        cropWidth = cropWidth.coerceIn(2, width) and -2
-        cropHeight = cropHeight.coerceIn(2, height) and -2
+        cropWidth = cropWidth.coerceAtLeast(2)
+        cropHeight = cropHeight.coerceAtLeast(2)
 
         val left = ((width - cropWidth) / 2) and -2
         val top = ((height - cropHeight) / 2) and -2
         return Rect(left, top, left + cropWidth, top + cropHeight)
+    }
+
+    private fun cropNv21(
+        source: ByteArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        crop: Rect
+    ): Nv21Frame {
+        val cropWidth = crop.width() and -2
+        val cropHeight = crop.height() and -2
+        if (crop.left == 0 && crop.top == 0 &&
+            cropWidth == sourceWidth && cropHeight == sourceHeight
+        ) {
+            return Nv21Frame(source, sourceWidth, sourceHeight)
+        }
+
+        val output = ByteArray(cropWidth * cropHeight * 3 / 2)
+        val sourceYSize = sourceWidth * sourceHeight
+        val destYSize = cropWidth * cropHeight
+
+        for (row in 0 until cropHeight) {
+            val srcOffset = (crop.top + row) * sourceWidth + crop.left
+            val dstOffset = row * cropWidth
+            System.arraycopy(source, srcOffset, output, dstOffset, cropWidth)
+        }
+
+        for (row in 0 until cropHeight / 2) {
+            val srcOffset = sourceYSize + (crop.top / 2 + row) * sourceWidth + crop.left
+            val dstOffset = destYSize + row * cropWidth
+            System.arraycopy(source, srcOffset, output, dstOffset, cropWidth)
+        }
+
+        return Nv21Frame(output, cropWidth, cropHeight)
+    }
+
+    /**
+     * Rotates NV21 without decoding to Bitmap/JPEG first. This avoids a second lossy JPEG
+     * pass and keeps latency lower while supporting vertical phone use.
+     */
+    private fun rotateNv21(
+        source: ByteArray,
+        width: Int,
+        height: Int,
+        rotationDegrees: Int
+    ): Nv21Frame {
+        if (rotationDegrees == 0) return Nv21Frame(source, width, height)
+        if (rotationDegrees != 90 && rotationDegrees != 180 && rotationDegrees != 270) {
+            return Nv21Frame(source, width, height)
+        }
+
+        val newWidth = if (rotationDegrees == 90 || rotationDegrees == 270) height else width
+        val newHeight = if (rotationDegrees == 90 || rotationDegrees == 270) width else height
+        val output = ByteArray(source.size)
+
+        // Y plane
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val src = y * width + x
+                val dst = when (rotationDegrees) {
+                    90 -> x * newWidth + (height - 1 - y)
+                    180 -> (height - 1 - y) * newWidth + (width - 1 - x)
+                    else -> (width - 1 - x) * newWidth + y // 270
+                }
+                output[dst] = source[src]
+            }
+        }
+
+        // Interleaved VU plane, handled as 2x2 chroma blocks.
+        val srcYSize = width * height
+        val dstYSize = newWidth * newHeight
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        val newChromaWidth = newWidth / 2
+
+        for (by in 0 until chromaHeight) {
+            for (bx in 0 until chromaWidth) {
+                val src = srcYSize + by * width + bx * 2
+                val dstBx: Int
+                val dstBy: Int
+                when (rotationDegrees) {
+                    90 -> {
+                        dstBx = chromaHeight - 1 - by
+                        dstBy = bx
+                    }
+                    180 -> {
+                        dstBx = chromaWidth - 1 - bx
+                        dstBy = chromaHeight - 1 - by
+                    }
+                    else -> {
+                        dstBx = by
+                        dstBy = chromaWidth - 1 - bx
+                    }
+                }
+                val dst = dstYSize + dstBy * (newChromaWidth * 2) + dstBx * 2
+                output[dst] = source[src]
+                output[dst + 1] = source[src + 1]
+            }
+        }
+
+        return Nv21Frame(output, newWidth, newHeight)
     }
 
     private fun yuv420ToNv21(image: ImageProxy): ByteArray {
@@ -98,6 +235,7 @@ object ImageUtils {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
         var outputPos = outputOffset
+
         for (row in 0 until height) {
             val rowStart = row * rowStride
             for (col in 0 until width) {

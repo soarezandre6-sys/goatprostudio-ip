@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectionStatusText: TextView
     private lateinit var addressText: TextView
     private lateinit var streamInfoText: TextView
+    private lateinit var performanceText: TextView
     private lateinit var streamButton: Button
     private lateinit var switchCameraButton: Button
     private lateinit var torchButton: Button
@@ -80,6 +81,12 @@ class MainActivity : AppCompatActivity() {
     private var autoDiscoveryEnabled = true
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
+
+    private var metricsWindowStartedNs = 0L
+    private var analysisFrameCount = 0
+    private var encodedFrameCount = 0
+    private var encodedBytes = 0L
+    private var encodeTimeTotalNs = 0L
 
     @Volatile
     private var manualExposureEnabled = false
@@ -154,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         connectionStatusText = findViewById(R.id.connectionStatusText)
         addressText = findViewById(R.id.addressText)
         streamInfoText = findViewById(R.id.streamInfoText)
+        performanceText = findViewById(R.id.performanceText)
         streamButton = findViewById(R.id.streamButton)
         switchCameraButton = findViewById(R.id.switchCameraButton)
         torchButton = findViewById(R.id.torchButton)
@@ -235,6 +243,7 @@ class MainActivity : AppCompatActivity() {
                     actualStreamWidth = 0
                     actualStreamHeight = 0
                     lastEncodedFrameNs = 0L
+                    resetPerformanceStats()
                     updateStreamInfo()
                     applyPreviewAspectRatio()
                     if (ContextCompat.checkSelfPermission(
@@ -264,6 +273,7 @@ class MainActivity : AppCompatActivity() {
                 if (profile != selectedQualityProfile) {
                     selectedQualityProfile = profile
                     lastEncodedFrameNs = 0L
+                    resetPerformanceStats()
                     updateStreamInfo()
                     if (server.isRunning()) {
                         Toast.makeText(
@@ -382,6 +392,7 @@ class MainActivity : AppCompatActivity() {
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(resolutionSelector)
                 .setTargetRotation(targetRotation)
+                .setOutputImageRotationEnabled(true)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { useCase ->
@@ -391,25 +402,37 @@ class MainActivity : AppCompatActivity() {
 
                             val profile = selectedQualityProfile
                             val now = System.nanoTime()
+                            recordAnalysisFrame(now)
+
                             val frameIntervalNs = 1_000_000_000L / profile.targetFps
-                            if (now - lastEncodedFrameNs < frameIntervalNs) return@setAnalyzer
+                            if (now - lastEncodedFrameNs < frameIntervalNs) {
+                                publishPerformanceStatsIfDue(now)
+                                return@setAnalyzer
+                            }
                             lastEncodedFrameNs = now
 
-                            val rotation = selectedRotationMode.resolve(image.imageInfo.rotationDegrees)
+                            // CameraX now rotates the ImageProxy natively to targetRotation.
+                            // AUTO therefore requires no Kotlin per-pixel rotation. Manual
+                            // overrides are still applied as an explicit extra quarter-turn.
+                            val manualRotation = selectedRotationMode.offsetDegrees
+                            val encodeStartedNs = System.nanoTime()
                             val encoded = ImageUtils.imageProxyToJpeg(
                                 image = image,
                                 quality = profile.jpegQuality,
-                                rotationDegrees = rotation
+                                rotationDegrees = manualRotation
                             )
+                            val encodeElapsedNs = System.nanoTime() - encodeStartedNs
 
                             if (encoded != null) {
                                 server.offerFrame(encoded.bytes)
+                                recordEncodedFrame(encoded.bytes.size, encodeElapsedNs)
                                 if (encoded.width != actualStreamWidth || encoded.height != actualStreamHeight) {
                                     actualStreamWidth = encoded.width
                                     actualStreamHeight = encoded.height
                                     runOnUiThread { updateStreamInfo() }
                                 }
                             }
+                            publishPerformanceStatsIfDue(System.nanoTime())
                         } finally {
                             image.close()
                         }
@@ -433,6 +456,65 @@ class MainActivity : AppCompatActivity() {
                 setError("ERRO AO ABRIR A CÂMERA")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun resetPerformanceStats() {
+        metricsWindowStartedNs = 0L
+        analysisFrameCount = 0
+        encodedFrameCount = 0
+        encodedBytes = 0L
+        encodeTimeTotalNs = 0L
+        if (::performanceText.isInitialized) {
+            runOnUiThread {
+                performanceText.text = "Desempenho: aguardando transmissão…"
+            }
+        }
+    }
+
+    private fun recordAnalysisFrame(nowNs: Long) {
+        if (metricsWindowStartedNs == 0L) metricsWindowStartedNs = nowNs
+        analysisFrameCount++
+    }
+
+    private fun recordEncodedFrame(bytes: Int, elapsedNs: Long) {
+        encodedFrameCount++
+        encodedBytes += bytes.toLong()
+        encodeTimeTotalNs += elapsedNs
+    }
+
+    private fun publishPerformanceStatsIfDue(nowNs: Long) {
+        val started = metricsWindowStartedNs
+        if (started == 0L) return
+        val elapsedNs = nowNs - started
+        if (elapsedNs < 1_000_000_000L) return
+
+        val seconds = elapsedNs / 1_000_000_000.0
+        val cameraFps = analysisFrameCount / seconds
+        val jpegFps = encodedFrameCount / seconds
+        val avgEncodeMs = if (encodedFrameCount > 0) {
+            encodeTimeTotalNs / encodedFrameCount / 1_000_000.0
+        } else {
+            0.0
+        }
+        val megabitsPerSecond = if (seconds > 0.0) {
+            encodedBytes * 8.0 / seconds / 1_000_000.0
+        } else {
+            0.0
+        }
+
+        analysisFrameCount = 0
+        encodedFrameCount = 0
+        encodedBytes = 0L
+        encodeTimeTotalNs = 0L
+        metricsWindowStartedNs = nowNs
+
+        runOnUiThread {
+            if (::performanceText.isInitialized) {
+                performanceText.text =
+                    "REAL: câmera %.1f FPS • JPEG %.1f FPS • encode %.1f ms • %.1f Mbps"
+                        .format(cameraFps, jpegFps, avgEncodeMs, megabitsPerSecond)
+            }
+        }
     }
 
     private fun setupOrientationTracking() {
@@ -710,6 +792,7 @@ class MainActivity : AppCompatActivity() {
 
         refreshAddress()
         lastEncodedFrameNs = 0L
+        resetPerformanceStats()
         server.start()
         server.setAudioEnabled(audioEnabled)
         if (audioEnabled && !audioCapture.start()) {
@@ -731,6 +814,7 @@ class MainActivity : AppCompatActivity() {
         server.setAudioEnabled(false)
         server.stop()
         lastEncodedFrameNs = 0L
+        resetPerformanceStats()
         setReadyState()
         updateConnectionStatus(0)
         streamButton.text = "Iniciar transmissão"

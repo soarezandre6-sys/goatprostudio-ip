@@ -361,3 +361,23 @@ Branch: `build-9-alpha`
 - APK extraído: app-debug.apk;
 - APK SHA-256: 617b3a326f4336048805d4a1a5d96d890c9e7d1a68e96ead94b4812878af8d72;
 - tamanho APK: 4.806.815 bytes.
+
+
+## Build 10 — múltiplas câmeras/lentes
+Branch: `build-10-alpha`
+
+### Nova seleção de câmera
+- detecção das câmeras/lentes que o Android/Camera2 realmente expõe;
+- traseira principal;
+- ultra-wide/grande angular;
+- tele/zoom;
+- frontal;
+- nomes incluem distância focal quando disponível;
+- em aparelhos com câmera lógica multi-camera, a Build 10 tenta usar os IDs físicos expostos pelo Camera2;
+- quando o fabricante não expõe uma lente a apps de terceiros, ela não aparece como opção falsa;
+- seletor de câmera/lente no aplicativo;
+- seletor de câmera/lente no painel web aberto pelo GOAT PRO Studio;
+- botão rápido agora percorre todas as câmeras/lentes disponíveis;
+- resoluções 720p/1080p/2K/4K passam a ser recalculadas para a lente atualmente selecionada;
+- versão 0.10.0-alpha;
+- workflow preparado, mas APK ainda não gerado.

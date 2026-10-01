@@ -69,3 +69,18 @@ Branch: `build-2-alpha`
 
 ### Regra de compilação
 A branch `build-2-alpha` não dispara o workflow automático. Gerar APK somente após autorização do usuário.
+
+
+## Build 4 — teste integrado
+Branch: `build-4-alpha`
+
+### Objetivo
+- manter vídeo 16:9 e áudio do celular já validados;
+- manter descoberta automática por rede local;
+- corrigir a integração da Build 3 para que o GOAT PRO Studio crie/reconecte automaticamente a fonte de vídeo `GOAT PRO IP · [IP]` na cena;
+- evitar criação duplicada da mesma fonte;
+- preservar a busca manual de IP/hotspot para outras câmeras.
+
+### Integração Windows
+Branch de teste correspondente: `goat-pro-build-564-ip-integration`.
+A Build 561 estável permanece intacta.

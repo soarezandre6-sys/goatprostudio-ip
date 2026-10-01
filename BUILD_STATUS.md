@@ -209,3 +209,19 @@ Configuração observada:
 - fast-path para o layout Camera2 YUV_420_888 com chroma VU intercalado, evitando centenas de milhares de leituras ByteBuffer por quadro Full HD;
 - fallback genérico mantido para aparelhos/layouts incompatíveis;
 - objetivo de validação: aproximar 1080p de 20 FPS antes de iniciar 2K/4K.
+
+
+### Correção do painel web — exposição manual
+Teste da Build 6:
+- zoom digital validado;
+- compensação EV validada;
+- chave de exposição manual não liberava ISO/obturador.
+
+Correção na Build 7:
+- suporte manual não depende mais apenas da flag MANUAL_SENSOR;
+- valida também AE OFF + faixas reais de ISO e tempo de exposição anunciadas pelo Camera2;
+- modo manual envia AE OFF + SENSOR_SENSITIVITY + SENSOR_EXPOSURE_TIME + SENSOR_FRAME_DURATION;
+- aplicação é confirmada pelo ListenableFuture do Camera2; falha desativa o estado manual;
+- ao desligar manual, os overrides Camera2 são limpos e a câmera volta para exposição automática;
+- painel recebe estado manualApplied para distinguir solicitação de aplicação real;
+- nenhuma nova APK gerada após esta correção.

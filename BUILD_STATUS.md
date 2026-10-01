@@ -190,3 +190,22 @@ Teste real da Build 6:
 - versão 0.7.0-alpha;
 - nenhuma alteração no GOAT PRO Studio nesta rodada;
 - APK ainda não compilado: workflow aguardando autorização explícita.
+
+
+### Referência IP Webcam Pro recebida do teste
+Configuração observada:
+- Camera2 Primary Camera;
+- vídeo 1920×1080;
+- Quality 50;
+- orientação Landscape;
+- FPS limit: No limit;
+- Focus/Flash/Antibanding/Scene/White Balance em Default.
+
+### Ajuste correspondente na Build 7
+- perfil Baixa latência alterado para Q50 / alvo 20 FPS;
+- Equilibrado Q65 / 20 FPS;
+- Alta qualidade Q80 / 20 FPS;
+- Máxima qualidade Q90 / 15 FPS;
+- fast-path para o layout Camera2 YUV_420_888 com chroma VU intercalado, evitando centenas de milhares de leituras ByteBuffer por quadro Full HD;
+- fallback genérico mantido para aparelhos/layouts incompatíveis;
+- objetivo de validação: aproximar 1080p de 20 FPS antes de iniciar 2K/4K.

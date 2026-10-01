@@ -194,7 +194,7 @@ class MjpegServer(
     }
 
     private fun serveHealth(socket: Socket) {
-        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.5.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
+        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"version\":\"0.6.0-alpha\",\"videoClients\":${videoClients.size},\"streaming\":${running.get()},\"audioEnabled\":${audioEnabled.get()},\"audioRate\":${AudioCapture.SAMPLE_RATE},\"audioChannels\":1}"
         serveText(socket, "200 OK", "application/json", body)
     }
 
@@ -369,6 +369,8 @@ class MjpegServer(
         latestFrame.set(null)
         latestAudio.set(null)
     }
+
+    fun videoClientCount(): Int = videoClients.size
 
     fun isRunning(): Boolean = running.get()
 }

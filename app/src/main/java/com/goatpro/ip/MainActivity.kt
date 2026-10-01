@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
+        applyPreviewAspectRatio()
         setupResolutionSelector()
         refreshAddress()
         updateStreamInfo()
@@ -92,6 +93,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun applyPreviewAspectRatio() {
+        previewView.post {
+            val width = previewView.width
+            if (width <= 0) return@post
+
+            val targetHeight = (width * PREVIEW_HEIGHT_RATIO).toInt()
+            if (previewView.layoutParams.height != targetHeight) {
+                previewView.layoutParams = previewView.layoutParams.apply {
+                    height = targetHeight
+                }
+                previewView.requestLayout()
+            }
+        }
+    }
+
     private fun setupResolutionSelector() {
         val labels = ResolutionPreset.entries.map { it.label }
         resolutionSpinner.adapter = ArrayAdapter(
@@ -110,6 +126,7 @@ class MainActivity : AppCompatActivity() {
                 if (newPreset != selectedPreset) {
                     selectedPreset = newPreset
                     updateStreamInfo()
+                    applyPreviewAspectRatio()
                     if (ContextCompat.checkSelfPermission(
                             this@MainActivity,
                             Manifest.permission.CAMERA
@@ -251,5 +268,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val FRAME_INTERVAL_NS = 33_333_333L
+        private const val PREVIEW_HEIGHT_RATIO = 9f / 16f
     }
 }

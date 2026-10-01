@@ -817,20 +817,29 @@ class MainActivity : AppCompatActivity() {
 
             "whiteBalance" -> {
                 val requested = whiteBalanceModeFromName(value.orEmpty()) ?: return
-                selectedWhiteBalanceMode = requested
-                applyAutomaticSensorControls()
+                val supported = camera2IntArray(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)
+                if (supported.contains(requested)) {
+                    selectedWhiteBalanceMode = requested
+                    applyAutomaticSensorControls()
+                }
             }
 
             "antibanding" -> {
                 val requested = antibandingModeFromName(value.orEmpty()) ?: return
-                selectedAntibandingMode = requested
-                applyAutomaticSensorControls()
+                val supported = camera2IntArray(CameraCharacteristics.CONTROL_AE_AVAILABLE_ANTIBANDING_MODES)
+                if (supported.contains(requested)) {
+                    selectedAntibandingMode = requested
+                    applyAutomaticSensorControls()
+                }
             }
 
             "sceneMode" -> {
                 val requested = sceneModeFromName(value.orEmpty()) ?: return
-                selectedSceneMode = requested
-                applyAutomaticSensorControls()
+                val supported = camera2IntArray(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)
+                if (requested == CaptureRequest.CONTROL_SCENE_MODE_DISABLED || supported.contains(requested)) {
+                    selectedSceneMode = requested
+                    applyAutomaticSensorControls()
+                }
             }
 
             "frameDurationUs" -> {
@@ -877,6 +886,18 @@ class MainActivity : AppCompatActivity() {
                 manualExposureTimeNs = requestedUs.coerceAtLeast(1L) * 1_000L
                 if (manualExposureEnabled) applyManualExposure()
             }
+        }
+    }
+
+    private fun camera2IntArray(
+        key: CameraCharacteristics.Key<IntArray>
+    ): IntArray {
+        val camera = currentCamera ?: return intArrayOf()
+        return try {
+            Camera2CameraInfo.from(camera.cameraInfo)
+                .getCameraCharacteristic(key) ?: intArrayOf()
+        } catch (_: Exception) {
+            intArrayOf()
         }
     }
 

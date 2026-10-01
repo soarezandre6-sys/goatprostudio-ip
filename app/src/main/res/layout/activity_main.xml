@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 4 • conexão automática corrigida com o GOAT PRO Studio"
+                    android:text="Build 5 • qualidade, baixa latência e rotação do stream"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -156,6 +156,36 @@
                 android:layout_marginTop="4dp"
                 android:backgroundTint="@color/gold" />
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Qualidade / largura de banda"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Spinner
+                android:id="@+id/qualitySpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:backgroundTint="@color/gold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Rotação da imagem transmitida"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Spinner
+                android:id="@+id/rotationSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:backgroundTint="@color/gold" />
+
             <Button
                 android:id="@+id/switchCameraButton"
                 android:layout_width="match_parent"
@@ -225,7 +255,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 4: descoberta automática corrigida + vídeo 16:9 + áudio do celular."
+            android:text="Build 5: vídeo automático + qualidade/latência ajustável + rotação vertical/horizontal + áudio integrado."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

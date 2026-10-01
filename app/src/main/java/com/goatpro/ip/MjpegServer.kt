@@ -274,7 +274,10 @@ class MjpegServer(
                     <select id="resolution" onchange="cmd('resolution',this.value)">
                       <option value="HD">720p</option>
                       <option value="FHD">1080p</option>
+                      <option value="QHD">2K / 1440p · experimental</option>
+                      <option value="UHD">4K / 2160p · experimental</option>
                     </select>
+                    <div class="rangeLimits" id="resolutionSupport">Verificando resoluções suportadas…</div>
 
                     <label>Preset rápido</label>
                     <select id="quality" onchange="cmd('quality',this.value)">
@@ -445,6 +448,21 @@ class MjpegServer(
                   await cmd('frameDurationUs',String(us));
                 }
 
+                function applyResolutionSupport(csv,current){
+                  const supported=String(csv||'').split(',').map(v=>v.trim()).filter(Boolean);
+                  const select=document.getElementById('resolution');
+                  Array.from(select.options).forEach(o=>{
+                    o.disabled=!supported.includes(o.value);
+                  });
+                  if(supported.includes(current)) select.value=current;
+                  document.getElementById('resolutionSupport').textContent=
+                    supported.length
+                      ? 'Disponível nesta câmera: '+supported.map(v=>({
+                          HD:'720p',FHD:'1080p',QHD:'2K',UHD:'4K'
+                        }[v]||v)).join(' · ')
+                      : 'Não foi possível ler as resoluções da câmera';
+                }
+
                 function fillSelectFromCsv(id,csv,current){
                   const el=document.getElementById(id);
                   if(!el)return 0;
@@ -538,7 +556,10 @@ class MjpegServer(
                   try{
                     const s=await fetch('/camera/state?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());
                     if(!s.available){document.getElementById('status').textContent='Câmera indisponível';return;}
-                    document.getElementById('resolution').value=s.resolution||'FHD';
+                    applyResolutionSupport(
+                      s.supportedResolutionsCsv||'HD,FHD',
+                      s.resolution||'FHD'
+                    );
                     document.getElementById('quality').value=s.quality||'BALANCED';
                     const jq=document.getElementById('jpegQuality');
                     jq.value=Number(s.jpegQuality||65);

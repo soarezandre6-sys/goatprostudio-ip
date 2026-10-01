@@ -161,3 +161,32 @@ Branch: `build-6-alpha`
 - versão Android: `0.6.0-alpha`;
 - workflow preparado para `build-6-alpha`;
 - APK só será compilado mediante autorização explícita.
+
+
+## Build 7 — Full HD / FPS
+Branch: `build-7-alpha`
+
+### Motivo
+Teste real da Build 6:
+- 1080p: aproximadamente 6–8 FPS no Studio;
+- 720p: aproximadamente 16–18 FPS;
+- rotação automática validada pelo usuário.
+
+### Gargalo encontrado
+- a Build 6 rotacionava o buffer NV21 pixel a pixel em Kotlin antes do JPEG;
+- em Full HD isso adicionava processamento proporcional ao número de pixels e limitava fortemente o throughput.
+
+### Alterações
+- ImageAnalysis agora usa rotação de saída nativa do CameraX;
+- no modo AUTO, removida a rotação NV21 pixel a pixel do caminho crítico;
+- rotações manuais continuam como override;
+- mantido STRATEGY_KEEP_ONLY_LATEST para não acumular frames antigos;
+- adicionada telemetria visível em tempo real:
+  - FPS entregue pela câmera ao analyzer;
+  - FPS efetivamente convertido em JPEG;
+  - tempo médio de encode em ms;
+  - taxa aproximada do MJPEG em Mbps;
+- telemetria reinicia ao trocar resolução/perfil e ao iniciar/parar transmissão;
+- versão 0.7.0-alpha;
+- nenhuma alteração no GOAT PRO Studio nesta rodada;
+- APK ainda não compilado: workflow aguardando autorização explícita.

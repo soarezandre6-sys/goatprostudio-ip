@@ -16,6 +16,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -28,19 +29,36 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
+    private lateinit var connectionStatusText: TextView
     private lateinit var addressText: TextView
     private lateinit var streamInfoText: TextView
     private lateinit var streamButton: Button
     private lateinit var switchCameraButton: Button
+    private lateinit var torchButton: Button
+    private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
     private lateinit var resolutionSpinner: Spinner
 
     private lateinit var cameraExecutor: ExecutorService
-    private val server = MjpegServer(8080)
+    private var currentCamera: Camera? = null
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var selectedPreset = ResolutionPreset.FHD
     private var ignoreFirstSpinnerCallback = true
     private var lastEncodedFrameNs = 0L
+    private var torchEnabled = false
+    private var audioEnabled = false
+
+    private val server by lazy {
+        MjpegServer(8080, object : MjpegServer.Listener {
+            override fun onVideoClientCountChanged(count: Int) {
+                runOnUiThread { updateConnectionStatus(count) }
+            }
+        })
+    }
+
+    private val audioCapture by lazy {
+        AudioCapture(this, server::offerAudio)
+    }
 
     private val cameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -52,16 +70,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val audioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        audioEnabled = granted
+        if (granted && server.isRunning()) {
+            if (!audioCapture.start()) {
+                audioEnabled = false
+                Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        if (!granted) {
+            Toast.makeText(this, "Permissão de microfone não concedida.", Toast.LENGTH_SHORT).show()
+        }
+        updateAudioButton()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         previewView = findViewById(R.id.previewView)
         statusText = findViewById(R.id.statusText)
+        connectionStatusText = findViewById(R.id.connectionStatusText)
         addressText = findViewById(R.id.addressText)
         streamInfoText = findViewById(R.id.streamInfoText)
         streamButton = findViewById(R.id.streamButton)
         switchCameraButton = findViewById(R.id.switchCameraButton)
+        torchButton = findViewById(R.id.torchButton)
+        audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -70,12 +107,19 @@ class MainActivity : AppCompatActivity() {
         setupResolutionSelector()
         refreshAddress()
         updateStreamInfo()
+        updateConnectionStatus(0)
+        updateAudioButton()
+        updateTorchButton()
 
         streamButton.setOnClickListener {
             if (server.isRunning()) stopStreaming() else startStreaming()
         }
 
         switchCameraButton.setOnClickListener {
+            if (torchEnabled) {
+                currentCamera?.cameraControl?.enableTorch(false)
+                torchEnabled = false
+            }
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
                 CameraSelector.LENS_FACING_FRONT
             } else {
@@ -84,6 +128,8 @@ class MainActivity : AppCompatActivity() {
             startCamera()
         }
 
+        torchButton.setOnClickListener { toggleTorch() }
+        audioButton.setOnClickListener { toggleAudio() }
         copyAddressButton.setOnClickListener { copyAddressToClipboard() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -162,7 +208,6 @@ class MainActivity : AppCompatActivity() {
                         try {
                             if (!server.isRunning()) return@setAnalyzer
 
-                            // Cap the software encoder to a maximum of ~30 FPS.
                             val now = System.nanoTime()
                             if (now - lastEncodedFrameNs < FRAME_INTERVAL_NS) return@setAnalyzer
                             lastEncodedFrameNs = now
@@ -177,12 +222,64 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, selector, preview, analysis)
+                currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
+                torchEnabled = false
+                updateTorchButton()
                 if (!server.isRunning()) setReadyState()
             } catch (_: Exception) {
+                currentCamera = null
+                updateTorchButton()
                 setError("ERRO AO ABRIR A CÂMERA")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun toggleTorch() {
+        val camera = currentCamera
+        if (camera == null || !camera.cameraInfo.hasFlashUnit()) {
+            Toast.makeText(this, "Lanterna indisponível nesta câmera.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        torchEnabled = !torchEnabled
+        camera.cameraControl.enableTorch(torchEnabled)
+        updateTorchButton()
+    }
+
+    private fun toggleAudio() {
+        if (audioEnabled) {
+            audioEnabled = false
+            audioCapture.stop()
+            updateAudioButton()
+            return
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            audioEnabled = true
+            if (server.isRunning() && !audioCapture.start()) {
+                audioEnabled = false
+                Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
+            }
+            updateAudioButton()
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun updateTorchButton() {
+        if (!::torchButton.isInitialized) return
+        val available = currentCamera?.cameraInfo?.hasFlashUnit() == true
+        torchButton.isEnabled = available
+        torchButton.text = when {
+            !available -> "Lanterna indisponível"
+            torchEnabled -> "Lanterna: ligada"
+            else -> "Lanterna: desligada"
+        }
+    }
+
+    private fun updateAudioButton() {
+        if (!::audioButton.isInitialized) return
+        audioButton.text = if (audioEnabled) "Áudio: ativado" else "Áudio: desligado"
     }
 
     private fun startStreaming() {
@@ -195,20 +292,46 @@ class MainActivity : AppCompatActivity() {
 
         refreshAddress()
         server.start()
+        if (audioEnabled && !audioCapture.start()) {
+            audioEnabled = false
+            updateAudioButton()
+            Toast.makeText(this, "Vídeo iniciado sem áudio.", Toast.LENGTH_SHORT).show()
+        }
         statusText.text = "TRANSMITINDO PARA O GOAT PRO STUDIO"
         statusText.setTextColor(ContextCompat.getColor(this, R.color.green))
+        updateConnectionStatus(0)
         streamButton.text = "Parar transmissão"
         streamButton.backgroundTintList = ContextCompat.getColorStateList(this, R.color.red)
         streamButton.setTextColor(ContextCompat.getColor(this, android.R.color.white))
     }
 
     private fun stopStreaming() {
+        audioCapture.stop()
         server.stop()
         lastEncodedFrameNs = 0L
         setReadyState()
+        updateConnectionStatus(0)
         streamButton.text = "Iniciar transmissão"
         streamButton.backgroundTintList = ContextCompat.getColorStateList(this, R.color.gold)
         streamButton.setTextColor(ContextCompat.getColor(this, R.color.black))
+    }
+
+    private fun updateConnectionStatus(count: Int) {
+        if (!::connectionStatusText.isInitialized) return
+        when {
+            count > 0 -> {
+                connectionStatusText.text = "CONECTADO AO GOAT PRO STUDIO • $count conexão(ões)"
+                connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.green))
+            }
+            server.isRunning() -> {
+                connectionStatusText.text = "TRANSMISSÃO ATIVA • AGUARDANDO CONEXÃO"
+                connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.muted))
+            }
+            else -> {
+                connectionStatusText.text = "SEM CONEXÃO ATIVA"
+                connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.muted))
+            }
+        }
     }
 
     private fun setReadyState() {
@@ -252,6 +375,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (torchEnabled) {
+            currentCamera?.cameraControl?.enableTorch(false)
+        }
+        audioCapture.stop()
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()

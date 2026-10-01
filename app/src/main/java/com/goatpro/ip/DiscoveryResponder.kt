@@ -41,7 +41,7 @@ class DiscoveryResponder(
                             append("|audio=/audio.pcm")
                             append("|streaming=").append(if (isStreaming()) "1" else "0")
                             append("|audioEnabled=").append(if (isAudioEnabled()) "1" else "0")
-                            append("|version=0.11.0-alpha")
+                            append("|version=0.12.0-alpha")
                         }.toByteArray(Charsets.UTF_8)
 
                         val reply = DatagramPacket(

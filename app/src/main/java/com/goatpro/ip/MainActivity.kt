@@ -75,7 +75,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var selectedRotationMode = RotationMode.AUTO
 
-    private var lastEncodedFrameNs = 0L
+    private var nextEncodeDueNs = 0L
     private var torchEnabled = false
     private var audioEnabled = false
     private var autoDiscoveryEnabled = true
@@ -248,7 +248,7 @@ class MainActivity : AppCompatActivity() {
                     selectedPreset = newPreset
                     actualStreamWidth = 0
                     actualStreamHeight = 0
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
                     applyPreviewAspectRatio()
@@ -278,7 +278,7 @@ class MainActivity : AppCompatActivity() {
                 val profile = QualityProfile.entries[position]
                 if (profile != selectedQualityProfile) {
                     selectedQualityProfile = profile
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
                     if (server.isRunning()) {
@@ -309,7 +309,7 @@ class MainActivity : AppCompatActivity() {
                     selectedRotationMode = mode
                     actualStreamWidth = 0
                     actualStreamHeight = 0
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     applyCameraTargetRotation(
                         if (mode == RotationMode.AUTO) autoSurfaceRotation else Surface.ROTATION_0
                     )
@@ -411,11 +411,22 @@ class MainActivity : AppCompatActivity() {
                             recordAnalysisFrame(now)
 
                             val frameIntervalNs = 1_000_000_000L / profile.targetFps
-                            if (now - lastEncodedFrameNs < frameIntervalNs) {
+                            if (nextEncodeDueNs == 0L) {
+                                nextEncodeDueNs = now
+                            }
+                            if (now < nextEncodeDueNs) {
                                 publishPerformanceStatsIfDue(now)
                                 return@setAnalyzer
                             }
-                            lastEncodedFrameNs = now
+
+                            // Advance against a fixed timeline instead of resetting from
+                            // the current camera frame. With a ~30 FPS camera and a 20 FPS
+                            // target this yields the intended 2-of-3 cadence (~20 FPS),
+                            // rather than the old 1-of-2 cadence (~15 FPS).
+                            nextEncodeDueNs += frameIntervalNs
+                            if (now - nextEncodeDueNs > frameIntervalNs * 2L) {
+                                nextEncodeDueNs = now + frameIntervalNs
+                            }
 
                             // CameraX now rotates the ImageProxy natively to targetRotation.
                             // AUTO therefore requires no Kotlin per-pixel rotation. Manual
@@ -544,7 +555,7 @@ class MainActivity : AppCompatActivity() {
                     applyCameraTargetRotation(rotation)
                     actualStreamWidth = 0
                     actualStreamHeight = 0
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     runOnUiThread { updateStreamInfo() }
                 }
             }
@@ -574,7 +585,7 @@ class MainActivity : AppCompatActivity() {
                     resolutionSpinner.setSelection(ResolutionPreset.entries.indexOf(preset))
                     actualStreamWidth = 0
                     actualStreamHeight = 0
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
                     applyPreviewAspectRatio()
@@ -589,7 +600,7 @@ class MainActivity : AppCompatActivity() {
                 if (profile != selectedQualityProfile) {
                     selectedQualityProfile = profile
                     qualitySpinner.setSelection(QualityProfile.entries.indexOf(profile))
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
                     if (manualExposureEnabled) applyManualExposure()
@@ -605,7 +616,7 @@ class MainActivity : AppCompatActivity() {
                     rotationSpinner.setSelection(RotationMode.entries.indexOf(mode))
                     actualStreamWidth = 0
                     actualStreamHeight = 0
-                    lastEncodedFrameNs = 0L
+                    nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     applyCameraTargetRotation(
                         if (mode == RotationMode.AUTO) autoSurfaceRotation else Surface.ROTATION_0
@@ -993,7 +1004,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         refreshAddress()
-        lastEncodedFrameNs = 0L
+        nextEncodeDueNs = 0L
         resetPerformanceStats()
         server.start()
         server.setAudioEnabled(audioEnabled)
@@ -1015,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         server.stop()
-        lastEncodedFrameNs = 0L
+        nextEncodeDueNs = 0L
         resetPerformanceStats()
         setReadyState()
         updateConnectionStatus(0)

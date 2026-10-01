@@ -1178,7 +1178,11 @@ class MainActivity : AppCompatActivity() {
             } else {
                 targetFrameNs
             }
-            var frameDurationNs = maxOf(requestedFrameNs, manualExposureTimeNs)
+            var frameDurationNs = maxOf(
+                requestedFrameNs,
+                targetFrameNs,
+                manualExposureTimeNs
+            )
             caps.maxFrameDurationNs?.let {
                 frameDurationNs = frameDurationNs.coerceAtMost(it)
             }

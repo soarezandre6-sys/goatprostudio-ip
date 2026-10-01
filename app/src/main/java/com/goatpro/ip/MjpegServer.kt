@@ -261,6 +261,7 @@ class MjpegServer(
               <div class="wrap">
                 <h1>GOAT PRO IP</h1>
                 <div class="muted">Painel web da câmera · controles aplicados no celular em tempo real</div>
+                <div class="muted" id="rtspAddress" style="margin-top:5px;color:#9ee493"></div>
                 <div class="grid">
                   <div class="panel">
                     <img src="/video" alt="Live View">
@@ -620,6 +621,8 @@ class MjpegServer(
                       (s.manualApplied?' · EXPOSIÇÃO MANUAL ATIVA':'');
                   }catch(e){document.getElementById('status').textContent='Estado indisponível: '+e;}
                 }
+                document.getElementById('rtspAddress').textContent=
+                  'H.264 RTSP experimental: rtsp://'+location.hostname+':8554/h264';
                 loadState();
                 setInterval(loadState,3000);
               </script>

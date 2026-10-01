@@ -927,28 +927,28 @@ class MainActivity : AppCompatActivity() {
         val targetFps: Int
     ) {
         LOW_LATENCY(
-            "Baixa latência • Q62 • 30 FPS",
+            "Baixa latência • Q50 • 20 FPS",
             "Baixa latência",
-            62,
-            30
+            50,
+            20
         ),
         BALANCED(
-            "Equilibrado • Q80 • 30 FPS",
+            "Equilibrado • Q65 • 20 FPS",
             "Equilibrado",
-            80,
-            30
+            65,
+            20
         ),
         HIGH_QUALITY(
-            "Alta qualidade • Q90 • 25 FPS",
+            "Alta qualidade • Q80 • 20 FPS",
             "Alta qualidade",
-            90,
-            25
+            80,
+            20
         ),
         MAX_QUALITY(
-            "Máxima qualidade • Q96 • 20 FPS",
+            "Máxima qualidade • Q90 • 15 FPS",
             "Máxima qualidade",
-            96,
-            20
+            90,
+            15
         )
     }
 

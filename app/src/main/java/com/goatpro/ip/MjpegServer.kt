@@ -275,13 +275,31 @@ class MjpegServer(
                       <option value="FHD">1080p</option>
                     </select>
 
-                    <label>Qualidade / largura de banda</label>
+                    <label>Preset rápido</label>
                     <select id="quality" onchange="cmd('quality',this.value)">
                       <option value="LOW_LATENCY">Baixa latência · Q50 · 20 FPS</option>
                       <option value="BALANCED">Equilibrado · Q65 · 20 FPS</option>
                       <option value="HIGH_QUALITY">Alta qualidade · Q80 · 20 FPS</option>
                       <option value="MAX_QUALITY">Máxima qualidade · Q90 · 15 FPS</option>
+                      <option value="CUSTOM">Personalizado</option>
                     </select>
+
+                    <label class="rangeHead">
+                      <span>Qualidade JPEG</span>
+                      <span class="rangeValue" id="jpegQualityText">65%</span>
+                    </label>
+                    <input id="jpegQuality" type="range" min="1" max="100" step="1" value="65"
+                           oninput="jpegQualityText.textContent=this.value+'%'"
+                           onchange="cmd('jpegQuality',this.value)">
+
+                    <label class="rangeHead">
+                      <span>Limite de FPS</span>
+                      <span class="rangeValue" id="fpsLimitText">20 FPS</span>
+                    </label>
+                    <input id="fpsLimit" type="range" min="0" max="30" step="1" value="20"
+                           oninput="fpsLimitText.textContent=(this.value==='0'?'Sem limite':this.value+' FPS')"
+                           onchange="cmd('fpsLimit',this.value)">
+                    <div class="rangeLimits">0 = sem limite · útil para medir o máximo real do aparelho</div>
 
                     <label>Rotação da imagem</label>
                     <select id="rotation" onchange="cmd('rotation',this.value)">
@@ -428,6 +446,13 @@ class MjpegServer(
                     if(!s.available){document.getElementById('status').textContent='Câmera indisponível';return;}
                     document.getElementById('resolution').value=s.resolution||'FHD';
                     document.getElementById('quality').value=s.quality||'BALANCED';
+                    const jq=document.getElementById('jpegQuality');
+                    jq.value=Number(s.jpegQuality||65);
+                    document.getElementById('jpegQualityText').textContent=Math.round(jq.value)+'%';
+                    const fl=document.getElementById('fpsLimit');
+                    fl.value=Number(s.targetFps||0);
+                    document.getElementById('fpsLimitText').textContent=
+                      Number(s.targetFps||0)<=0?'Sem limite':Math.round(Number(s.targetFps))+' FPS';
                     document.getElementById('rotation').value=s.rotation||'AUTO';
                     document.getElementById('autoDiscovery').checked=!!s.autoDiscovery;
                     document.getElementById('audioEnabled').checked=!!s.audioEnabled;
@@ -472,8 +497,8 @@ class MjpegServer(
                     document.getElementById('manual').disabled=!s.manualSupported;
                     document.getElementById('status').textContent=
                       'Câmera '+s.camera+' · '+s.width+'×'+s.height+
-                      ' · '+(s.qualityLabel||'')+
-                      ' · alvo '+(s.targetFps||'?')+' FPS'+
+                      ' · JPEG '+(s.jpegQuality||'?')+'%'+
+                      ' · '+(Number(s.targetFps||0)<=0?'FPS sem limite':'alvo '+s.targetFps+' FPS')+
                       ' · '+(s.torch?'lanterna ligada':'lanterna desligada')+
                       (s.manualApplied?' · EXPOSIÇÃO MANUAL ATIVA':'');
                   }catch(e){document.getElementById('status').textContent='Estado indisponível: '+e;}

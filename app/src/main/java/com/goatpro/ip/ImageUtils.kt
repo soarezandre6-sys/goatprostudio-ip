@@ -210,6 +210,42 @@ object ImageUtils {
         var offset = ySize
         val chromaWidth = width / 2
         val chromaHeight = height / 2
+
+        // Most Camera2 devices expose YUV_420_888 chroma as an interleaved VU buffer
+        // (NV21-compatible) with pixelStride=2. Detect that layout and bulk-copy rows
+        // instead of doing ~500k indexed ByteBuffer reads per Full-HD frame.
+        if (uPixelStride == 2 && vPixelStride == 2 &&
+            uRowStride == vRowStride &&
+            looksLikeInterleavedVu(uBuffer, vBuffer, uRowStride, chromaWidth, chromaHeight)
+        ) {
+            val v = vBuffer.duplicate()
+            for (row in 0 until chromaHeight) {
+                val rowStart = row * vRowStride
+                val wanted = width
+                val available = (v.limit() - rowStart).coerceAtLeast(0)
+                val copy = minOf(wanted, available)
+                if (copy > 0) {
+                    v.position(rowStart)
+                    v.get(out, offset, copy)
+                    offset += copy
+                }
+                if (copy < wanted) {
+                    // The final interleaved U byte can be outside the V-plane view.
+                    var col = copy / 2
+                    if ((copy and 1) != 0) {
+                        out[offset++] = uBuffer.get(row * uRowStride + col * uPixelStride)
+                        col++
+                    }
+                    while (col < chromaWidth) {
+                        out[offset++] = vBuffer.get(row * vRowStride + col * vPixelStride)
+                        out[offset++] = uBuffer.get(row * uRowStride + col * uPixelStride)
+                        col++
+                    }
+                }
+            }
+            return out
+        }
+
         for (row in 0 until chromaHeight) {
             val uRow = row * uRowStride
             val vRow = row * vRowStride
@@ -221,6 +257,38 @@ object ImageUtils {
             }
         }
         return out
+    }
+
+    private fun looksLikeInterleavedVu(
+        uBuffer: java.nio.ByteBuffer,
+        vBuffer: java.nio.ByteBuffer,
+        rowStride: Int,
+        chromaWidth: Int,
+        chromaHeight: Int
+    ): Boolean {
+        if (chromaWidth < 2 || chromaHeight < 1) return false
+        return try {
+            val rowsToCheck = minOf(chromaHeight, 2)
+            val cols = intArrayOf(0, chromaWidth / 3, (chromaWidth * 2) / 3, chromaWidth - 2)
+                .map { it.coerceIn(0, chromaWidth - 1) }
+                .distinct()
+
+            var matches = 0
+            var samples = 0
+            for (row in 0 until rowsToCheck) {
+                for (col in cols) {
+                    val uIndex = row * rowStride + col * 2
+                    val vuUIndex = row * rowStride + col * 2 + 1
+                    if (uIndex < uBuffer.limit() && vuUIndex < vBuffer.limit()) {
+                        samples++
+                        if (uBuffer.get(uIndex) == vBuffer.get(vuUIndex)) matches++
+                    }
+                }
+            }
+            samples >= 3 && matches == samples
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun copyPlane(

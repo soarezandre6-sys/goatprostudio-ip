@@ -5,6 +5,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
 import android.os.Bundle
 import android.util.Size
 import android.view.OrientationEventListener
@@ -18,8 +20,13 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -30,7 +37,9 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
+@OptIn(ExperimentalCamera2Interop::class)
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
@@ -69,11 +78,27 @@ class MainActivity : AppCompatActivity() {
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
 
+    @Volatile
+    private var manualExposureEnabled = false
+
+    @Volatile
+    private var manualIso = 100
+
+    @Volatile
+    private var manualExposureTimeNs = 10_000_000L
+
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {
                 runOnUiThread { updateConnectionStatus(count) }
             }
+
+            override fun onCameraControl(action: String, value: String?): String {
+                runOnUiThread { applyRemoteCameraControl(action, value) }
+                return "Comando enviado: $action"
+            }
+
+            override fun cameraControlStateJson(): String = buildCameraControlStateJson()
         })
     }
 
@@ -346,6 +371,7 @@ class MainActivity : AppCompatActivity() {
                 previewUseCase = preview
                 analysisUseCase = analysis
                 currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
+                manualExposureEnabled = false
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
@@ -392,6 +418,185 @@ class MainActivity : AppCompatActivity() {
     private fun applyCameraTargetRotation(rotation: Int) {
         previewUseCase?.targetRotation = rotation
         analysisUseCase?.targetRotation = rotation
+    }
+
+    private fun applyRemoteCameraControl(action: String, value: String?) {
+        val camera = currentCamera
+        when (action) {
+            "switch" -> {
+                if (torchEnabled) {
+                    camera?.cameraControl?.enableTorch(false)
+                    torchEnabled = false
+                }
+                manualExposureEnabled = false
+                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                    CameraSelector.LENS_FACING_FRONT
+                } else {
+                    CameraSelector.LENS_FACING_BACK
+                }
+                startCamera()
+            }
+
+            "torch" -> toggleTorch()
+
+            "zoom" -> {
+                val zoomState = camera?.cameraInfo?.zoomState?.value ?: return
+                val requested = value?.toFloatOrNull() ?: return
+                val ratio = requested.coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+                camera.cameraControl.setZoomRatio(ratio)
+            }
+
+            "ev" -> {
+                if (manualExposureEnabled) return
+                val state = camera?.cameraInfo?.exposureState ?: return
+                val requested = value?.toIntOrNull() ?: return
+                val range = state.exposureCompensationRange
+                camera.cameraControl.setExposureCompensationIndex(
+                    requested.coerceIn(range.lower, range.upper)
+                )
+            }
+
+            "focus" -> {
+                if (camera == null || previewView.width <= 0 || previewView.height <= 0) return
+                val point = previewView.meteringPointFactory.createPoint(
+                    previewView.width / 2f,
+                    previewView.height / 2f
+                )
+                val focus = FocusMeteringAction.Builder(
+                    point,
+                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                )
+                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                    .build()
+                camera.cameraControl.startFocusAndMetering(focus)
+            }
+
+            "manual" -> {
+                manualExposureEnabled = value == "1" || value.equals("true", true)
+                applyManualExposure()
+            }
+
+            "iso" -> {
+                val requested = value?.toIntOrNull() ?: return
+                manualIso = requested
+                if (manualExposureEnabled) applyManualExposure()
+            }
+
+            "shutterUs" -> {
+                val requestedUs = value?.toLongOrNull() ?: return
+                manualExposureTimeNs = requestedUs.coerceAtLeast(1L) * 1_000L
+                if (manualExposureEnabled) applyManualExposure()
+            }
+        }
+    }
+
+    private fun manualSensorRanges(): Triple<IntRange?, LongRange?, Boolean> {
+        val camera = currentCamera ?: return Triple(null, null, false)
+        return try {
+            val info = Camera2CameraInfo.from(camera.cameraInfo)
+            val iso = info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE
+            )
+            val shutter = info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE
+            )
+            val capabilities = info.getCameraCharacteristic(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+            ) ?: intArrayOf()
+            val manualSupported = capabilities.contains(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
+            ) && iso != null && shutter != null
+
+            Triple(
+                iso?.let { it.lower..it.upper },
+                shutter?.let { it.lower..it.upper },
+                manualSupported
+            )
+        } catch (_: Exception) {
+            Triple(null, null, false)
+        }
+    }
+
+    private fun applyManualExposure(): Boolean {
+        val camera = currentCamera ?: return false
+        return try {
+            val (isoRange, shutterRange, supported) = manualSensorRanges()
+            val control = Camera2CameraControl.from(camera.cameraControl)
+            val options = CaptureRequestOptions.Builder()
+
+            if (manualExposureEnabled && supported && isoRange != null && shutterRange != null) {
+                manualIso = manualIso.coerceIn(isoRange.first, isoRange.last)
+                manualExposureTimeNs = manualExposureTimeNs.coerceIn(
+                    shutterRange.first,
+                    shutterRange.last
+                )
+                options.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_OFF
+                )
+                options.setCaptureRequestOption(
+                    CaptureRequest.SENSOR_SENSITIVITY,
+                    manualIso
+                )
+                options.setCaptureRequestOption(
+                    CaptureRequest.SENSOR_EXPOSURE_TIME,
+                    manualExposureTimeNs
+                )
+            } else {
+                manualExposureEnabled = false
+                options.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON
+                )
+            }
+
+            control.setCaptureRequestOptions(options.build())
+            true
+        } catch (_: Exception) {
+            manualExposureEnabled = false
+            false
+        }
+    }
+
+    private fun buildCameraControlStateJson(): String {
+        val camera = currentCamera ?: return "{\"available\":false}"
+        return try {
+            val zoom = camera.cameraInfo.zoomState.value
+            val exposure = camera.cameraInfo.exposureState
+            val evRange = exposure.exposureCompensationRange
+            val (isoRange, shutterRange, manualSupported) = manualSensorRanges()
+            val currentZoom = zoom?.zoomRatio ?: 1f
+            val minZoom = zoom?.minZoomRatio ?: 1f
+            val maxZoom = zoom?.maxZoomRatio ?: 1f
+            val currentEv = exposure.exposureCompensationIndex
+            val cameraName = if (lensFacing == CameraSelector.LENS_FACING_BACK) "traseira" else "frontal"
+            val minShutterUs = (shutterRange?.first ?: 100_000L) / 1_000L
+            val maxShutterUs = (shutterRange?.last ?: 1_000_000_000L) / 1_000L
+            val currentShutterUs = manualExposureTimeNs / 1_000L
+
+            "{\"available\":true" +
+                ",\"camera\":\"$cameraName\"" +
+                ",\"torch\":$torchEnabled" +
+                ",\"zoom\":$currentZoom" +
+                ",\"minZoom\":$minZoom" +
+                ",\"maxZoom\":$maxZoom" +
+                ",\"ev\":$currentEv" +
+                ",\"minEv\":${evRange.lower}" +
+                ",\"maxEv\":${evRange.upper}" +
+                ",\"manualSupported\":$manualSupported" +
+                ",\"manual\":$manualExposureEnabled" +
+                ",\"iso\":$manualIso" +
+                ",\"minIso\":${isoRange?.first ?: 50}" +
+                ",\"maxIso\":${isoRange?.last ?: 12800}" +
+                ",\"shutterUs\":$currentShutterUs" +
+                ",\"minShutterUs\":$minShutterUs" +
+                ",\"maxShutterUs\":$maxShutterUs" +
+                ",\"width\":$actualStreamWidth" +
+                ",\"height\":$actualStreamHeight" +
+                "}"
+        } catch (_: Exception) {
+            "{\"available\":false}"
+        }
     }
 
     private fun toggleTorch() {

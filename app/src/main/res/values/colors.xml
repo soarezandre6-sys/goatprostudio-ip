@@ -3,7 +3,10 @@
     <color name="bg">#05070A</color>
     <color name="panel">#11151B</color>
     <color name="panel_2">#181D25</color>
+    <color name="panel_3">#242C36</color>
+    <color name="line">#596776</color>
     <color name="gold">#F2B620</color>
+    <color name="gold_soft">#FFD66A</color>
     <color name="gold_dark">#C58A00</color>
     <color name="text">#F6F7F9</color>
     <color name="muted">#AAB2BF</color>

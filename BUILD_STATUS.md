@@ -1,4 +1,4 @@
-# GOAT PRO IP — Status do projeto
+# GOAT Cam — Status do projeto
 
 ## Build 1
 Estado atual: **APK de teste gerado com sucesso e pronto para validação em aparelho Android real**.
@@ -432,3 +432,16 @@ Branch: `build-11-alpha`
 - integridade ZIP/APK: OK;
 - targetSdk/compileSdk: 36;
 - link interno oficial: https://goatprostudio.com.br.
+
+
+## Build 12 — renomeação para GOAT Cam
+Branch: `build-12-goat-cam`
+
+- nome comercial alterado de **GOAT PRO IP** para **GOAT Cam**;
+- launcher/app, cabeçalho, rodapé, painel web e textos visíveis atualizados;
+- Android 16 / API 36 preservado;
+- link para `goatprostudio.com.br` preservado;
+- versão: 0.12.0-alpha / versionCode 12;
+- protocolo de descoberta `GOAT_PRO_IP_V1` e `GOAT_PRO_IP_DISCOVER_V1` preservado para compatibilidade com o GOAT PRO Studio;
+- identificadores internos e histórico das builds anteriores não foram apagados;
+- APK Build 12 ainda não gerado.

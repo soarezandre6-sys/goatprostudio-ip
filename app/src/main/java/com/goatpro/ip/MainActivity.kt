@@ -1267,6 +1267,16 @@ class MainActivity : AppCompatActivity() {
             val currentShutterUs = manualExposureTimeNs / 1_000L
             val maxFocusDiopters = manualFocusMaxDiopters()
             val manualFocusSupported = maxFocusDiopters > 0f
+            val aperturesCsv = availableApertures().joinToString(",")
+            val filtersCsv = availableFilterDensities().joinToString(",")
+            val maxFrameDurationUs = (manualCaps.maxFrameDurationNs ?: 1_000_000_000L) / 1_000L
+            val currentFrameDurationUs = (
+                if (manualFrameDurationNs > 0L) {
+                    manualFrameDurationNs
+                } else {
+                    1_000_000_000L / (if (streamTargetFps > 0) streamTargetFps else 30)
+                }
+            ) / 1_000L
 
             "{\"available\":true" +
                 ",\"resolution\":\"${selectedPreset.name}\"" +
@@ -1289,6 +1299,15 @@ class MainActivity : AppCompatActivity() {
                 ",\"manual\":$manualExposureEnabled" +
                 ",\"manualApplied\":$manualRequestApplied" +
                 ",\"manualFocusSupported\":$manualFocusSupported" +
+                ",\"whiteBalance\":\"${whiteBalanceName(selectedWhiteBalanceMode)}\"" +
+                ",\"antibanding\":\"${antibandingName(selectedAntibandingMode)}\"" +
+                ",\"sceneMode\":\"${sceneModeName(selectedSceneMode)}\"" +
+                ",\"aperturesCsv\":\"$aperturesCsv\"" +
+                ",\"selectedAperture\":${selectedAperture ?: -1f}" +
+                ",\"filterDensitiesCsv\":\"$filtersCsv\"" +
+                ",\"selectedFilterDensity\":${selectedFilterDensity ?: -1f}" +
+                ",\"frameDurationUs\":$currentFrameDurationUs" +
+                ",\"maxFrameDurationUs\":$maxFrameDurationUs" +
                 ",\"manualFocus\":$manualFocusEnabled" +
                 ",\"focusDiopters\":$manualFocusDiopters" +
                 ",\"maxFocusDiopters\":$maxFocusDiopters" +

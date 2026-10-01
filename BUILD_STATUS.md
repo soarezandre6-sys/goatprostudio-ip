@@ -264,3 +264,14 @@ Teste real mostrou:
 - versão 0.8.0-alpha;
 - somente APK será necessário nesta rodada;
 - APK ainda não compilado: aguarda autorização explícita.
+
+
+### Painel manual — barras de ISO e obturador
+Correção adicional da Build 8:
+- removidos campos numéricos com setas para ISO e tempo de exposição;
+- ISO agora usa slider com valor atual e faixa real reportada pela câmera;
+- passo do ISO é adaptado à faixa disponível, preservando ajuste fino;
+- obturador usa slider logarítmico/progressivo para cobrir de microssegundos a exposições longas sem ficar impraticável;
+- painel exibe o obturador em formato amigável (ex.: 1/1000 s, 1/30 s, 100 ms) e também em microssegundos;
+- limites mínimo/máximo da câmera aparecem abaixo de cada slider;
+- nenhuma nova APK gerada após esta correção.

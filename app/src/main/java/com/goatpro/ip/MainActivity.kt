@@ -517,6 +517,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun styledSpinnerAdapter(labels: List<String>): ArrayAdapter<String> =
+        ArrayAdapter(
+            this,
+            R.layout.spinner_item,
+            R.id.spinnerText,
+            labels
+        ).apply {
+            setDropDownViewResource(R.layout.spinner_dropdown_item)
+        }
+
     private fun setupCameraLensSelector() {
         cameraLensOptions = runCatching { buildCameraLensOptions() }
             .getOrDefault(emptyList())
@@ -547,11 +557,8 @@ class MainActivity : AppCompatActivity() {
 
         lensFacing = selectedCameraOption?.facing ?: CameraSelector.LENS_FACING_BACK
 
-        cameraLensSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            cameraLensOptions.map { it.label }
-        )
+        cameraLensSpinner.adapter =
+            styledSpinnerAdapter(cameraLensOptions.map { it.label })
         cameraLensSpinner.setSelection(
             cameraLensOptions.indexOf(selectedCameraOption).coerceAtLeast(0)
         )
@@ -653,11 +660,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        resolutionSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            availableResolutionPresets.map { it.label }
-        )
+        resolutionSpinner.adapter =
+            styledSpinnerAdapter(availableResolutionPresets.map { it.label })
         resolutionSpinner.setSelection(
             availableResolutionPresets.indexOf(selectedPreset).coerceAtLeast(0)
         )
@@ -734,11 +738,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupQualitySelector() {
-        qualitySpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            QualityProfile.entries.map { it.label }
-        )
+        qualitySpinner.adapter =
+            styledSpinnerAdapter(QualityProfile.entries.map { it.label })
         qualitySpinner.setSelection(QualityProfile.entries.indexOf(selectedQualityProfile))
         qualitySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -767,11 +768,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRotationSelector() {
-        rotationSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            RotationMode.entries.map { it.label }
-        )
+        rotationSpinner.adapter =
+            styledSpinnerAdapter(RotationMode.entries.map { it.label })
         rotationSpinner.setSelection(RotationMode.entries.indexOf(selectedRotationMode))
         rotationSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -1940,7 +1938,8 @@ class MainActivity : AppCompatActivity() {
         statusText.setTextColor(ContextCompat.getColor(this, R.color.green))
         updateConnectionStatus(0)
         streamButton.text = "Parar transmissão"
-        streamButton.backgroundTintList = ContextCompat.getColorStateList(this, R.color.red)
+        streamButton.setBackgroundResource(R.drawable.bg_button_danger)
+        streamButton.backgroundTintList = null
         streamButton.setTextColor(ContextCompat.getColor(this, android.R.color.white))
     }
 
@@ -1955,7 +1954,8 @@ class MainActivity : AppCompatActivity() {
         setReadyState()
         updateConnectionStatus(0)
         streamButton.text = "Iniciar transmissão"
-        streamButton.backgroundTintList = ContextCompat.getColorStateList(this, R.color.gold)
+        streamButton.setBackgroundResource(R.drawable.bg_button_primary)
+        streamButton.backgroundTintList = null
         streamButton.setTextColor(ContextCompat.getColor(this, R.color.black))
     }
 

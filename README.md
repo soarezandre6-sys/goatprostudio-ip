@@ -53,3 +53,6 @@ A Build 1 precisa provar quatro pontos antes de crescer:
 
 ## Observação técnica
 MJPEG é proposital nesta primeira etapa por ser simples de testar e integrar. Em 1080p/30 ele pode consumir bastante CPU e banda em alguns celulares. Se os testes mostrarem gargalo, a evolução natural é H.264/RTSP ou WebRTC com codificação por hardware.
+
+
+<!-- build-trigger: Build 1 APK -->

@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 5 • qualidade, baixa latência e rotação do stream"
+                    android:text="Build 6 • automático ou manual + controles web + qualidade"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -94,6 +94,24 @@
                 android:textColor="@color/muted"
                 android:textSize="12sp"
                 android:textStyle="bold" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/autoDiscoverySwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:checked="true"
+                android:text="Conexão automática com o GOAT PRO Studio: LIGADA"
+                android:textColor="@color/text"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Desligada: o vídeo e o áudio continuam disponíveis pelo IP, mas o celular não se anuncia automaticamente ao Studio."
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/addressText"
@@ -255,7 +273,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 5: vídeo automático + qualidade/latência ajustável + rotação vertical/horizontal + áudio integrado."
+            android:text="Build 6: conexão automática opcional + rotação automática + qualidade/latência + painel web de câmera."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Size
+import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
@@ -46,8 +47,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rotationSpinner: Spinner
 
     private lateinit var cameraExecutor: ExecutorService
+    private lateinit var orientationListener: OrientationEventListener
     private var currentCamera: Camera? = null
+    private var previewUseCase: Preview? = null
+    private var analysisUseCase: ImageAnalysis? = null
     private var lensFacing = CameraSelector.LENS_FACING_BACK
+    private var autoSurfaceRotation = Surface.ROTATION_0
 
     @Volatile
     private var selectedPreset = ResolutionPreset.FHD
@@ -58,9 +63,6 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var selectedRotationMode = RotationMode.AUTO
 
-    private var ignoreFirstResolutionCallback = true
-    private var ignoreFirstQualityCallback = true
-    private var ignoreFirstRotationCallback = true
     private var lastEncodedFrameNs = 0L
     private var torchEnabled = false
     private var audioEnabled = false
@@ -133,6 +135,7 @@ class MainActivity : AppCompatActivity() {
         qualitySpinner = findViewById(R.id.qualitySpinner)
         rotationSpinner = findViewById(R.id.rotationSpinner)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        setupOrientationTracking()
 
         applyPreviewAspectRatio()
         setupResolutionSelector()
@@ -198,10 +201,6 @@ class MainActivity : AppCompatActivity() {
         resolutionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val newPreset = ResolutionPreset.entries[position]
-                if (ignoreFirstResolutionCallback) {
-                    ignoreFirstResolutionCallback = false
-                    return
-                }
                 if (newPreset != selectedPreset) {
                     selectedPreset = newPreset
                     actualStreamWidth = 0
@@ -233,14 +232,17 @@ class MainActivity : AppCompatActivity() {
         qualitySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val profile = QualityProfile.entries[position]
-                if (ignoreFirstQualityCallback) {
-                    ignoreFirstQualityCallback = false
-                    return
-                }
                 if (profile != selectedQualityProfile) {
                     selectedQualityProfile = profile
                     lastEncodedFrameNs = 0L
                     updateStreamInfo()
+                    if (server.isRunning()) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Perfil aplicado: " + profile.shortLabel,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
 
@@ -258,15 +260,14 @@ class MainActivity : AppCompatActivity() {
         rotationSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val mode = RotationMode.entries[position]
-                if (ignoreFirstRotationCallback) {
-                    ignoreFirstRotationCallback = false
-                    return
-                }
                 if (mode != selectedRotationMode) {
                     selectedRotationMode = mode
                     actualStreamWidth = 0
                     actualStreamHeight = 0
                     lastEncodedFrameNs = 0L
+                    applyCameraTargetRotation(
+                        if (mode == RotationMode.AUTO) autoSurfaceRotation else Surface.ROTATION_0
+                    )
                     updateStreamInfo()
                 }
             }
@@ -281,7 +282,11 @@ class MainActivity : AppCompatActivity() {
             val provider = providerFuture.get()
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             val size = selectedPreset.size
-            val targetRotation = previewView.display?.rotation ?: Surface.ROTATION_0
+            val targetRotation = if (selectedRotationMode == RotationMode.AUTO) {
+                autoSurfaceRotation
+            } else {
+                Surface.ROTATION_0
+            }
 
             val resolutionSelector = ResolutionSelector.Builder()
                 .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
@@ -338,16 +343,55 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 provider.unbindAll()
+                previewUseCase = preview
+                analysisUseCase = analysis
                 currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
             } catch (_: Exception) {
+                previewUseCase = null
+                analysisUseCase = null
                 currentCamera = null
                 updateTorchButton()
                 setError("ERRO AO ABRIR A CÂMERA")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun setupOrientationTracking() {
+        orientationListener = object : OrientationEventListener(this) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+
+                val rotation = when (orientation) {
+                    in 45..134 -> Surface.ROTATION_270
+                    in 135..224 -> Surface.ROTATION_180
+                    in 225..314 -> Surface.ROTATION_90
+                    else -> Surface.ROTATION_0
+                }
+
+                if (rotation == autoSurfaceRotation) return
+                autoSurfaceRotation = rotation
+
+                if (selectedRotationMode == RotationMode.AUTO) {
+                    applyCameraTargetRotation(rotation)
+                    actualStreamWidth = 0
+                    actualStreamHeight = 0
+                    lastEncodedFrameNs = 0L
+                    runOnUiThread { updateStreamInfo() }
+                }
+            }
+        }
+
+        if (orientationListener.canDetectOrientation()) {
+            orientationListener.enable()
+        }
+    }
+
+    private fun applyCameraTargetRotation(rotation: Int) {
+        previewUseCase?.targetRotation = rotation
+        analysisUseCase?.targetRotation = rotation
     }
 
     private fun toggleTorch() {
@@ -501,13 +545,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::orientationListener.isInitialized && orientationListener.canDetectOrientation()) {
+            orientationListener.enable()
+        }
         if (::addressText.isInitialized) refreshAddress()
+    }
+
+    override fun onPause() {
+        if (::orientationListener.isInitialized) orientationListener.disable()
+        super.onPause()
     }
 
     override fun onDestroy() {
         if (torchEnabled) {
             currentCamera?.cameraControl?.enableTorch(false)
         }
+        if (::orientationListener.isInitialized) orientationListener.disable()
         discoveryResponder.stop()
         audioCapture.stop()
         server.setAudioEnabled(false)
@@ -531,27 +584,27 @@ class MainActivity : AppCompatActivity() {
         val targetFps: Int
     ) {
         LOW_LATENCY(
-            "Baixa latência • Q78 • 30 FPS",
+            "Baixa latência • Q62 • 30 FPS",
             "Baixa latência",
-            78,
+            62,
             30
         ),
         BALANCED(
-            "Equilibrado • Q86 • 30 FPS",
+            "Equilibrado • Q80 • 30 FPS",
             "Equilibrado",
-            86,
+            80,
             30
         ),
         HIGH_QUALITY(
-            "Alta qualidade • Q92 • 24 FPS",
+            "Alta qualidade • Q90 • 25 FPS",
             "Alta qualidade",
-            92,
-            24
+            90,
+            25
         ),
         MAX_QUALITY(
-            "Máxima qualidade • Q95 • 20 FPS",
+            "Máxima qualidade • Q96 • 20 FPS",
             "Máxima qualidade",
-            95,
+            96,
             20
         )
     }

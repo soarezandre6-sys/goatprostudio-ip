@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 8 • Full HD real + 20 FPS corrigido"
+                    android:text="Build 9 • H.264 baixa latência"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -283,7 +283,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 8: Full HD vertical/horizontal correto + agendamento de 20 FPS + diagnóstico real."
+            android:text="Build 9: H.264 otimizado para baixa latência + Full HD real + painel avançado."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

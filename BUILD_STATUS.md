@@ -135,3 +135,29 @@ APK ainda não recompilado após essas correções.
 - estado/capacidades da câmera disponíveis em /camera/state;
 - comandos aplicados em /camera/control;
 - não exige nova build do GOAT PRO Studio; somente o APK precisa ser recompilado quando autorizado.
+
+
+## Build 6 — automático/manual + revisão Build 5
+Branch: `build-6-alpha`
+
+### Herdado e corrigido
+- conexão automática de áudio/vídeo com GOAT PRO Studio;
+- correção da fonte automática preta no receptor Windows já disponível no Studio 565;
+- rotação automática em tempo real pelo sensor do aparelho;
+- rotações manuais 90°/180°/270°;
+- perfis efetivos de qualidade/latência;
+- painel web próprio com zoom, EV, foco, câmera, lanterna e controles manuais Camera2 quando suportados.
+
+### Novo na Build 6
+- chave persistente `Conexão automática com o GOAT PRO Studio`;
+- ligada por padrão;
+- ligada: responde à descoberta UDP e o Studio pode adicionar/reconectar automaticamente;
+- desligada: servidor de vídeo/áudio continua ativo em HTTP, mas o APK para de se anunciar ao Studio;
+- desligar a chave não derruba uma conexão de vídeo já estabelecida;
+- modo escolhido é salvo e mantido ao reabrir o aplicativo;
+- status da transmissão informa quando está em modo manual.
+
+### Processo
+- versão Android: `0.6.0-alpha`;
+- workflow preparado para `build-6-alpha`;
+- APK só será compilado mediante autorização explícita.

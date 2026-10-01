@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Seu celular como câmera IP para o GOAT PRO Studio"
+                    android:text="Build 2 • câmera IP para o GOAT PRO Studio"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -68,12 +68,31 @@
             android:padding="14dp">
 
             <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="VÍNCULO COM O GOAT PRO STUDIO"
+                android:textColor="@color/gold"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
                 android:id="@+id/statusText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
                 android:text="PRONTO PARA TRANSMITIR"
                 android:textColor="@color/green"
                 android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/connectionStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="SEM CONEXÃO ATIVA"
+                android:textColor="@color/muted"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -145,6 +164,49 @@
                 android:backgroundTint="@color/panel_2"
                 android:text="Trocar câmera (traseira / frontal)"
                 android:textColor="@color/text" />
+
+            <Button
+                android:id="@+id/torchButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:backgroundTint="@color/panel_2"
+                android:text="Lanterna: desligada"
+                android:textColor="@color/text" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@color/panel"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ÁUDIO"
+                android:textColor="@color/gold"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="O microfone é opcional. Com o áudio desligado, a transmissão continua somente em vídeo."
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/audioButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:backgroundTint="@color/panel_2"
+                android:text="Áudio: desligado"
+                android:textColor="@color/text" />
         </LinearLayout>
 
         <Button
@@ -163,7 +225,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Na Build 1, o GOAT PRO Studio conecta pelo endereço IP mostrado acima. A descoberta automática entra na Build 3."
+            android:text="Build 2: conexão ainda pelo endereço IP. A descoberta automática fica para a Build 3."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

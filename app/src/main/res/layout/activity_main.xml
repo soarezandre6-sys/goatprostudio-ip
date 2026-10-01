@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 3 • conexão automática com o GOAT PRO Studio"
+                    android:text="Build 4 • conexão automática corrigida com o GOAT PRO Studio"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -225,7 +225,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 3: descoberta automática na rede local + vídeo 16:9 + áudio do celular."
+            android:text="Build 4: descoberta automática corrigida + vídeo 16:9 + áudio do celular."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

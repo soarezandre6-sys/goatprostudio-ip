@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GOAT PRO IP"
+rootProject.name = "GOAT Cam"
 include(":app")

@@ -563,6 +563,95 @@ class MainActivity : AppCompatActivity() {
     private fun applyRemoteCameraControl(action: String, value: String?) {
         val camera = currentCamera
         when (action) {
+            "resolution" -> {
+                val preset = when (value?.uppercase()) {
+                    "HD", "720P" -> ResolutionPreset.HD
+                    "FHD", "1080P" -> ResolutionPreset.FHD
+                    else -> return
+                }
+                if (preset != selectedPreset) {
+                    selectedPreset = preset
+                    resolutionSpinner.setSelection(ResolutionPreset.entries.indexOf(preset))
+                    actualStreamWidth = 0
+                    actualStreamHeight = 0
+                    lastEncodedFrameNs = 0L
+                    resetPerformanceStats()
+                    updateStreamInfo()
+                    applyPreviewAspectRatio()
+                    startCamera()
+                }
+            }
+
+            "quality" -> {
+                val profile = runCatching {
+                    QualityProfile.valueOf(value.orEmpty().uppercase())
+                }.getOrNull() ?: return
+                if (profile != selectedQualityProfile) {
+                    selectedQualityProfile = profile
+                    qualitySpinner.setSelection(QualityProfile.entries.indexOf(profile))
+                    lastEncodedFrameNs = 0L
+                    resetPerformanceStats()
+                    updateStreamInfo()
+                    if (manualExposureEnabled) applyManualExposure()
+                }
+            }
+
+            "rotation" -> {
+                val mode = runCatching {
+                    RotationMode.valueOf(value.orEmpty().uppercase())
+                }.getOrNull() ?: return
+                if (mode != selectedRotationMode) {
+                    selectedRotationMode = mode
+                    rotationSpinner.setSelection(RotationMode.entries.indexOf(mode))
+                    actualStreamWidth = 0
+                    actualStreamHeight = 0
+                    lastEncodedFrameNs = 0L
+                    resetPerformanceStats()
+                    applyCameraTargetRotation(
+                        if (mode == RotationMode.AUTO) autoSurfaceRotation else Surface.ROTATION_0
+                    )
+                    updateStreamInfo()
+                }
+            }
+
+            "autoDiscovery" -> {
+                val enabled = value == "1" || value.equals("true", true)
+                autoDiscoveryEnabled = enabled
+                getSharedPreferences("goat_pro_ip", Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("auto_discovery_enabled", enabled)
+                    .apply()
+                if (enabled) discoveryResponder.start() else discoveryResponder.stop()
+                autoDiscoverySwitch.isChecked = enabled
+                updateAutomaticDiscoveryText()
+                updateConnectionStatus(server.videoClientCount())
+            }
+
+            "audio" -> {
+                val enabled = value == "1" || value.equals("true", true)
+                if (!enabled) {
+                    audioEnabled = false
+                    server.setAudioEnabled(false)
+                    audioCapture.stop()
+                    updateAudioButton()
+                } else if (ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    audioEnabled = true
+                    server.setAudioEnabled(true)
+                    if (server.isRunning() && !audioCapture.start()) {
+                        audioEnabled = false
+                        server.setAudioEnabled(false)
+                    }
+                    updateAudioButton()
+                } else {
+                    audioEnabled = false
+                    server.setAudioEnabled(false)
+                    audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
             "switch" -> {
                 if (torchEnabled) {
                     camera?.cameraControl?.enableTorch(false)
@@ -811,6 +900,14 @@ class MainActivity : AppCompatActivity() {
             val currentShutterUs = manualExposureTimeNs / 1_000L
 
             "{\"available\":true" +
+                ",\"resolution\":\"${selectedPreset.name}\"" +
+                ",\"quality\":\"${selectedQualityProfile.name}\"" +
+                ",\"qualityLabel\":\"${selectedQualityProfile.shortLabel}\"" +
+                ",\"jpegQuality\":${selectedQualityProfile.jpegQuality}" +
+                ",\"targetFps\":${selectedQualityProfile.targetFps}" +
+                ",\"rotation\":\"${selectedRotationMode.name}\"" +
+                ",\"autoDiscovery\":$autoDiscoveryEnabled" +
+                ",\"audioEnabled\":$audioEnabled" +
                 ",\"camera\":\"$cameraName\"" +
                 ",\"torch\":$torchEnabled" +
                 ",\"zoom\":$currentZoom" +

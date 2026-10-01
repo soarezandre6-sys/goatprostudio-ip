@@ -231,10 +231,23 @@ object ImageUtils {
         outputOffset: Int,
         outputPixelStride: Int
     ) {
-        val buffer = plane.buffer
+        val buffer = plane.buffer.duplicate()
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
         var outputPos = outputOffset
+
+        // The Y plane on most Camera2 devices is tightly packed. Bulk row copies remove
+        // millions of ByteBuffer.get(index) calls per Full-HD frame and materially reduce
+        // encoder latency.
+        if (pixelStride == 1 && outputPixelStride == 1) {
+            for (row in 0 until height) {
+                val rowStart = row * rowStride
+                buffer.position(rowStart)
+                buffer.get(output, outputPos, width)
+                outputPos += width
+            }
+            return
+        }
 
         for (row in 0 until height) {
             val rowStart = row * rowStride

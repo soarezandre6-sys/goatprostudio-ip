@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.goatpro.ip"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.goatpro.ip"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 10
-        versionName = "0.10.0-alpha"
+        targetSdk = 36
+        versionCode = 11
+        versionName = "0.11.0-alpha"
     }
 
     buildTypes {

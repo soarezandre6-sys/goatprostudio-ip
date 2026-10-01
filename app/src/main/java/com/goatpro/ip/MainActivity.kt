@@ -115,6 +115,24 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var manualFocusDiopters = 0f
 
+    @Volatile
+    private var selectedWhiteBalanceMode = CaptureRequest.CONTROL_AWB_MODE_AUTO
+
+    @Volatile
+    private var selectedAntibandingMode = CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+
+    @Volatile
+    private var selectedSceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+
+    @Volatile
+    private var manualFrameDurationNs = 0L
+
+    @Volatile
+    private var selectedAperture: Float? = null
+
+    @Volatile
+    private var selectedFilterDensity: Float? = null
+
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {

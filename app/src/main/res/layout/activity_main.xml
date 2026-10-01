@@ -70,7 +70,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="BUILD 12 • GOAT CAM • ANDROID 16"
+                    android:text="GOAT CAM • RELEASE 1.0 • ANDROID 16"
                     android:textColor="@color/gold_soft"
                     android:textSize="10sp"
                     android:textStyle="bold" />
@@ -418,7 +418,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="13dp"
             android:gravity="center"
-            android:text="GOAT Cam • Build 12 experimental • Android 16"
+            android:text="GOAT Cam • Versão 1.0 • Android 16"
             android:textColor="@color/muted"
             android:textSize="10sp" />
 

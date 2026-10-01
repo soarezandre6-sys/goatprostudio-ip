@@ -3,7 +3,7 @@ name: Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, build-2-alpha ]
+    branches: [ main ]
 
 jobs:
   build:

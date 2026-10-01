@@ -1,6 +1,6 @@
-# GOAT PRO IP
+# GOAT Cam
 
-Aplicativo Android gratuito e companheiro do **GOAT PRO Studio**.
+Aplicativo Android oficial e companheiro do **GOAT PRO Studio**.
 
 ## Objetivo
 Transformar o smartphone em uma câmera IP pronta para ser usada no GOAT PRO Studio, sem depender de aplicativos de terceiros.
@@ -8,7 +8,7 @@ Transformar o smartphone em uma câmera IP pronta para ser usada no GOAT PRO Stu
 ## Build 1 - v0.1.0-alpha
 Estado atual do MVP:
 
-- identidade visual GOAT PRO IP com logo GOAT invertida em dourado/preto;
+- identidade visual GOAT Cam com logo GOAT invertida em dourado/preto;
 - câmera traseira e frontal;
 - preview local com CameraX;
 - presets 720p e 1080p;
@@ -24,7 +24,7 @@ Estado atual do MVP:
 
 ## Teste da Build 1
 1. Conecte celular e PC na mesma rede Wi-Fi.
-2. Abra o GOAT PRO IP e autorize a câmera.
+2. Abra o GOAT Cam e autorize a câmera.
 3. Selecione 720p ou 1080p.
 4. Toque em **Iniciar transmissão**.
 5. No PC, teste primeiro a URL exibida pelo app em um navegador.
@@ -47,7 +47,7 @@ A Build 1 precisa provar quatro pontos antes de crescer:
 - refinamento de estabilidade.
 
 ### Build 3
-- descoberta automática do GOAT PRO IP na mesma rede;
+- descoberta automática do GOAT Cam na mesma rede;
 - conexão simplificada sem digitar IP;
 - integração nativa no painel de câmeras do GOAT PRO Studio.
 
@@ -56,3 +56,9 @@ MJPEG é proposital nesta primeira etapa por ser simples de testar e integrar. E
 
 
 <!-- build-trigger: Build 1 APK -->
+
+
+## Nome atual do produto
+A partir da Build 12, o nome comercial do aplicativo passa a ser **GOAT Cam**.
+
+Os identificadores técnicos de compatibilidade de rede `GOAT_PRO_IP_*`, o pacote Android atual e o nome deste repositório permanecem preservados nesta etapa para não quebrar a integração já existente com o GOAT PRO Studio. Eles não são exibidos como marca para o usuário.

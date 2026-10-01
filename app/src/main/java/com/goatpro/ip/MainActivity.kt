@@ -2046,7 +2046,7 @@ class MainActivity : AppCompatActivity() {
         val urls =
             "MJPEG: http://$ip:8080/video\nH.264 RTSP: rtsp://$ip:8554/h264"
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("GOAT PRO IP", urls))
+        clipboard.setPrimaryClip(ClipData.newPlainText("GOAT Cam", urls))
         Toast.makeText(this, "Endereços MJPEG e H.264 copiados", Toast.LENGTH_SHORT).show()
     }
 

@@ -73,6 +73,12 @@ class MainActivity : AppCompatActivity() {
     private var selectedQualityProfile = QualityProfile.BALANCED
 
     @Volatile
+    private var streamJpegQuality = QualityProfile.BALANCED.jpegQuality
+
+    @Volatile
+    private var streamTargetFps = QualityProfile.BALANCED.targetFps
+
+    @Volatile
     private var selectedRotationMode = RotationMode.AUTO
 
     private var nextEncodeDueNs = 0L
@@ -284,6 +290,10 @@ class MainActivity : AppCompatActivity() {
                 val profile = QualityProfile.entries[position]
                 if (profile != selectedQualityProfile) {
                     selectedQualityProfile = profile
+                    if (profile != QualityProfile.CUSTOM) {
+                        streamJpegQuality = profile.jpegQuality
+                        streamTargetFps = profile.targetFps
+                    }
                     nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
@@ -417,11 +427,16 @@ class MainActivity : AppCompatActivity() {
                             val now = System.nanoTime()
                             recordAnalysisFrame(now)
 
-                            val frameIntervalNs = 1_000_000_000L / profile.targetFps
-                            if (nextEncodeDueNs == 0L) {
+                            val targetFps = streamTargetFps
+                            val frameIntervalNs = if (targetFps > 0) {
+                                1_000_000_000L / targetFps
+                            } else {
+                                0L
+                            }
+                            if (frameIntervalNs > 0L && nextEncodeDueNs == 0L) {
                                 nextEncodeDueNs = now
                             }
-                            if (now < nextEncodeDueNs) {
+                            if (frameIntervalNs > 0L && now < nextEncodeDueNs) {
                                 publishPerformanceStatsIfDue(now)
                                 return@setAnalyzer
                             }
@@ -430,9 +445,11 @@ class MainActivity : AppCompatActivity() {
                             // the current camera frame. With a ~30 FPS camera and a 20 FPS
                             // target this yields the intended 2-of-3 cadence (~20 FPS),
                             // rather than the old 1-of-2 cadence (~15 FPS).
-                            nextEncodeDueNs += frameIntervalNs
-                            if (now - nextEncodeDueNs > frameIntervalNs * 2L) {
-                                nextEncodeDueNs = now + frameIntervalNs
+                            if (frameIntervalNs > 0L) {
+                                nextEncodeDueNs += frameIntervalNs
+                                if (now - nextEncodeDueNs > frameIntervalNs * 2L) {
+                                    nextEncodeDueNs = now + frameIntervalNs
+                                }
                             }
 
                             // CameraX now rotates the ImageProxy natively to targetRotation.
@@ -442,7 +459,7 @@ class MainActivity : AppCompatActivity() {
                             val encodeStartedNs = System.nanoTime()
                             val encoded = ImageUtils.imageProxyToJpeg(
                                 image = image,
-                                quality = profile.jpegQuality,
+                                quality = streamJpegQuality,
                                 rotationDegrees = manualRotation
                             )
                             val encodeElapsedNs = System.nanoTime() - encodeStartedNs
@@ -606,14 +623,39 @@ class MainActivity : AppCompatActivity() {
                 val profile = runCatching {
                     QualityProfile.valueOf(value.orEmpty().uppercase())
                 }.getOrNull() ?: return
-                if (profile != selectedQualityProfile) {
+                if (profile != selectedQualityProfile || profile != QualityProfile.CUSTOM) {
                     selectedQualityProfile = profile
+                    if (profile != QualityProfile.CUSTOM) {
+                        streamJpegQuality = profile.jpegQuality
+                        streamTargetFps = profile.targetFps
+                    }
                     qualitySpinner.setSelection(QualityProfile.entries.indexOf(profile))
                     nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
                     if (manualExposureEnabled) applyManualExposure()
                 }
+            }
+
+            "jpegQuality" -> {
+                val requested = value?.toIntOrNull() ?: return
+                streamJpegQuality = requested.coerceIn(1, 100)
+                selectedQualityProfile = QualityProfile.CUSTOM
+                qualitySpinner.setSelection(QualityProfile.entries.indexOf(QualityProfile.CUSTOM))
+                nextEncodeDueNs = 0L
+                resetPerformanceStats()
+                updateStreamInfo()
+            }
+
+            "fpsLimit" -> {
+                val requested = value?.toIntOrNull() ?: return
+                streamTargetFps = if (requested <= 0) 0 else requested.coerceIn(5, 60)
+                selectedQualityProfile = QualityProfile.CUSTOM
+                qualitySpinner.setSelection(QualityProfile.entries.indexOf(QualityProfile.CUSTOM))
+                nextEncodeDueNs = 0L
+                resetPerformanceStats()
+                updateStreamInfo()
+                if (manualExposureEnabled) applyManualExposure()
             }
 
             "rotation" -> {
@@ -901,8 +943,9 @@ class MainActivity : AppCompatActivity() {
                 shutterRange.last
             )
 
+            val effectiveFps = if (streamTargetFps > 0) streamTargetFps else 30
             val targetFrameNs = 1_000_000_000L /
-                selectedQualityProfile.targetFps.coerceAtLeast(1)
+                effectiveFps.coerceAtLeast(1)
             var frameDurationNs = maxOf(targetFrameNs, manualExposureTimeNs)
             caps.maxFrameDurationNs?.let {
                 frameDurationNs = frameDurationNs.coerceAtMost(it)
@@ -1016,8 +1059,8 @@ class MainActivity : AppCompatActivity() {
                 ",\"resolution\":\"${selectedPreset.name}\"" +
                 ",\"quality\":\"${selectedQualityProfile.name}\"" +
                 ",\"qualityLabel\":\"${selectedQualityProfile.shortLabel}\"" +
-                ",\"jpegQuality\":${selectedQualityProfile.jpegQuality}" +
-                ",\"targetFps\":${selectedQualityProfile.targetFps}" +
+                ",\"jpegQuality\":$streamJpegQuality" +
+                ",\"targetFps\":$streamTargetFps" +
                 ",\"rotation\":\"${selectedRotationMode.name}\"" +
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
@@ -1189,8 +1232,10 @@ class MainActivity : AppCompatActivity() {
         } else {
             selectedPreset.label
         }
+        val fpsLabel = if (streamTargetFps > 0) "$streamTargetFps FPS" else "FPS sem limite"
+        val profileLabel = if (profile == QualityProfile.CUSTOM) "Personalizado" else profile.shortLabel
         streamInfoText.text =
-            "$dimensions • ${profile.targetFps} FPS • JPEG Q${profile.jpegQuality} • ${profile.shortLabel} • ${selectedRotationMode.shortLabel}"
+            "$dimensions • $fpsLabel • JPEG Q$streamJpegQuality • $profileLabel • ${selectedRotationMode.shortLabel}"
     }
 
     private fun copyAddressToClipboard() {
@@ -1268,6 +1313,12 @@ class MainActivity : AppCompatActivity() {
             "Máxima qualidade",
             90,
             15
+        ),
+        CUSTOM(
+            "Personalizado",
+            "Personalizado",
+            65,
+            20
         )
     }
 

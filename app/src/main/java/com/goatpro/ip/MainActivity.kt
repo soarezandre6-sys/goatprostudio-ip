@@ -508,6 +508,11 @@ class MainActivity : AppCompatActivity() {
                 manualControlStatus = "Exposição automática"
                 manualFocusEnabled = false
                 manualFocusDiopters = 0f
+                manualFrameDurationNs = 0L
+                selectedAperture = availableApertures().firstOrNull()
+                selectedFilterDensity = availableFilterDensities().firstOrNull()
+                applyAutomaticSensorControls()
+                applyLensControls()
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
@@ -810,6 +815,48 @@ class MainActivity : AppCompatActivity() {
                 applyManualFocus()
             }
 
+            "whiteBalance" -> {
+                val requested = whiteBalanceModeFromName(value.orEmpty()) ?: return
+                selectedWhiteBalanceMode = requested
+                applyAutomaticSensorControls()
+            }
+
+            "antibanding" -> {
+                val requested = antibandingModeFromName(value.orEmpty()) ?: return
+                selectedAntibandingMode = requested
+                applyAutomaticSensorControls()
+            }
+
+            "sceneMode" -> {
+                val requested = sceneModeFromName(value.orEmpty()) ?: return
+                selectedSceneMode = requested
+                applyAutomaticSensorControls()
+            }
+
+            "frameDurationUs" -> {
+                val requestedUs = value?.toLongOrNull() ?: return
+                manualFrameDurationNs = if (requestedUs <= 0L) 0L else requestedUs * 1_000L
+                if (manualExposureEnabled) applyManualExposure()
+            }
+
+            "aperture" -> {
+                val requested = value?.toFloatOrNull() ?: return
+                val values = availableApertures()
+                if (values.isNotEmpty()) {
+                    selectedAperture = values.minByOrNull { kotlin.math.abs(it - requested) }
+                    applyLensControls()
+                }
+            }
+
+            "filterDensity" -> {
+                val requested = value?.toFloatOrNull() ?: return
+                val values = availableFilterDensities()
+                if (values.isNotEmpty()) {
+                    selectedFilterDensity = values.minByOrNull { kotlin.math.abs(it - requested) }
+                    applyLensControls()
+                }
+            }
+
             "manual" -> {
                 manualExposureEnabled = value == "1" || value.equals("true", true)
                 if (manualExposureEnabled) {
@@ -1021,6 +1068,8 @@ class MainActivity : AppCompatActivity() {
             val control = Camera2CameraControl.from(camera.cameraControl)
             control.clearCaptureRequestOptions()
 
+            applyAutomaticSensorControls()
+            applyLensControls()
             if (manualExposureEnabled) {
                 applyManualExposure()
             }
@@ -1103,7 +1152,12 @@ class MainActivity : AppCompatActivity() {
             val effectiveFps = if (streamTargetFps > 0) streamTargetFps else 30
             val targetFrameNs = 1_000_000_000L /
                 effectiveFps.coerceAtLeast(1)
-            var frameDurationNs = maxOf(targetFrameNs, manualExposureTimeNs)
+            val requestedFrameNs = if (manualFrameDurationNs > 0L) {
+                manualFrameDurationNs
+            } else {
+                targetFrameNs
+            }
+            var frameDurationNs = maxOf(requestedFrameNs, manualExposureTimeNs)
             caps.maxFrameDurationNs?.let {
                 frameDurationNs = frameDurationNs.coerceAtMost(it)
             }
@@ -1175,6 +1229,8 @@ class MainActivity : AppCompatActivity() {
                 try {
                     future.get()
                     manualControlStatus = "Exposição automática"
+                    applyAutomaticSensorControls()
+                    applyLensControls()
                     if (manualFocusEnabled) {
                         applyManualFocus()
                     }

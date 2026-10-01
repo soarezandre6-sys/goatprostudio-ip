@@ -20,6 +20,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var resolutionSpinner: Spinner
     private lateinit var qualitySpinner: Spinner
     private lateinit var rotationSpinner: Spinner
+    private lateinit var autoDiscoverySwitch: SwitchCompat
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var orientationListener: OrientationEventListener
@@ -75,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private var lastEncodedFrameNs = 0L
     private var torchEnabled = false
     private var audioEnabled = false
+    private var autoDiscoveryEnabled = true
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
 
@@ -159,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         qualitySpinner = findViewById(R.id.qualitySpinner)
         rotationSpinner = findViewById(R.id.rotationSpinner)
+        autoDiscoverySwitch = findViewById(R.id.autoDiscoverySwitch)
         cameraExecutor = Executors.newSingleThreadExecutor()
         setupOrientationTracking()
 
@@ -166,12 +170,12 @@ class MainActivity : AppCompatActivity() {
         setupResolutionSelector()
         setupQualitySelector()
         setupRotationSelector()
+        setupAutomaticDiscovery()
         refreshAddress()
         updateStreamInfo()
         updateConnectionStatus(0)
         updateAudioButton()
         updateTorchButton()
-        discoveryResponder.start()
 
         streamButton.setOnClickListener {
             if (server.isRunning()) stopStreaming() else startStreaming()
@@ -298,6 +302,51 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun setupAutomaticDiscovery() {
+        val prefs = getSharedPreferences("goat_pro_ip", Context.MODE_PRIVATE)
+        autoDiscoveryEnabled = prefs.getBoolean("auto_discovery_enabled", true)
+
+        autoDiscoverySwitch.isChecked = autoDiscoveryEnabled
+        updateAutomaticDiscoveryText()
+
+        if (autoDiscoveryEnabled) {
+            discoveryResponder.start()
+        } else {
+            discoveryResponder.stop()
+        }
+
+        autoDiscoverySwitch.setOnCheckedChangeListener { _, checked ->
+            autoDiscoveryEnabled = checked
+            prefs.edit().putBoolean("auto_discovery_enabled", checked).apply()
+
+            if (checked) {
+                discoveryResponder.start()
+            } else {
+                discoveryResponder.stop()
+            }
+
+            updateAutomaticDiscoveryText()
+            Toast.makeText(
+                this,
+                if (checked) {
+                    "Conexão automática ativada"
+                } else {
+                    "Modo manual ativado: procure o IP no Studio"
+                },
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun updateAutomaticDiscoveryText() {
+        if (!::autoDiscoverySwitch.isInitialized) return
+        autoDiscoverySwitch.text = if (autoDiscoveryEnabled) {
+            "Conexão automática com o GOAT PRO Studio: LIGADA"
+        } else {
+            "Conexão automática com o GOAT PRO Studio: DESLIGADA · modo manual"
         }
     }
 
@@ -696,7 +745,11 @@ class MainActivity : AppCompatActivity() {
                 connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.green))
             }
             server.isRunning() -> {
-                connectionStatusText.text = "TRANSMISSÃO ATIVA • AGUARDANDO CONEXÃO"
+                connectionStatusText.text = if (autoDiscoveryEnabled) {
+                    "TRANSMISSÃO ATIVA • AGUARDANDO CONEXÃO AUTOMÁTICA"
+                } else {
+                    "TRANSMISSÃO ATIVA • MODO MANUAL • USE O IP NO STUDIO"
+                }
                 connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.muted))
             }
             else -> {

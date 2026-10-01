@@ -9,6 +9,7 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.os.Build
 import android.os.Bundle
 import android.util.Size
 import android.view.OrientationEventListener
@@ -25,6 +26,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
@@ -55,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var torchButton: Button
     private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
+    private lateinit var cameraLensSpinner: Spinner
     private lateinit var resolutionSpinner: Spinner
     private lateinit var qualitySpinner: Spinner
     private lateinit var rotationSpinner: Spinner
@@ -66,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private var previewUseCase: Preview? = null
     private var analysisUseCase: ImageAnalysis? = null
     private var lensFacing = CameraSelector.LENS_FACING_BACK
+    private var cameraLensOptions: List<CameraLensOption> = emptyList()
+    private var selectedCameraOption: CameraLensOption? = null
     private var autoSurfaceRotation = Surface.ROTATION_0
 
     @Volatile
@@ -239,6 +244,7 @@ class MainActivity : AppCompatActivity() {
         torchButton = findViewById(R.id.torchButton)
         audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
+        cameraLensSpinner = findViewById(R.id.cameraLensSpinner)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         qualitySpinner = findViewById(R.id.qualitySpinner)
         rotationSpinner = findViewById(R.id.rotationSpinner)
@@ -247,6 +253,7 @@ class MainActivity : AppCompatActivity() {
         setupOrientationTracking()
 
         applyPreviewAspectRatio()
+        setupCameraLensSelector()
         setupResolutionSelector()
         setupQualitySelector()
         setupRotationSelector()
@@ -262,17 +269,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         switchCameraButton.setOnClickListener {
-            if (torchEnabled) {
-                currentCamera?.cameraControl?.enableTorch(false)
-                torchEnabled = false
-            }
-            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                CameraSelector.LENS_FACING_FRONT
-            } else {
-                CameraSelector.LENS_FACING_BACK
-            }
-            refreshResolutionOptions()
-            startCamera()
+            cycleCameraLens()
         }
 
         torchButton.setOnClickListener { toggleTorch() }

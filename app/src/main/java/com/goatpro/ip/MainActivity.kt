@@ -148,7 +148,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private val rtspServer by lazy {
+    private val rtspServer: RtspH264Server by lazy {
         RtspH264Server(8554, object : RtspH264Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
@@ -161,7 +161,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private val h264Encoder by lazy {
+    private val h264Encoder: H264Encoder by lazy {
         H264Encoder(object : H264Encoder.Listener {
             override fun onAccessUnit(
                 data: ByteArray,

@@ -125,3 +125,13 @@ Branch: `build-5-alpha`
 - ao trocar o perfil durante transmissão, o app confirma visualmente que o perfil foi aplicado.
 
 APK ainda não recompilado após essas correções.
+
+
+### Painel web de controles — correção adicional da Build 5
+- a página raiz do GOAT PRO IP deixou de ser apenas uma tela de preview;
+- o botão "Painel web / controles da câmera" do GOAT PRO Studio continua abrindo o mesmo host/porta, mas agora recebe um painel próprio do GOAT PRO IP;
+- controles remotos adicionados: trocar câmera, lanterna, zoom, compensação de exposição e autofoco central;
+- ISO e tempo de exposição manual usam Camera2 quando o aparelho anuncia suporte MANUAL_SENSOR;
+- estado/capacidades da câmera disponíveis em /camera/state;
+- comandos aplicados em /camera/control;
+- não exige nova build do GOAT PRO Studio; somente o APK precisa ser recompilado quando autorizado.

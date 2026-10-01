@@ -225,3 +225,15 @@ Correção na Build 7:
 - ao desligar manual, os overrides Camera2 são limpos e a câmera volta para exposição automática;
 - painel recebe estado manualApplied para distinguir solicitação de aplicação real;
 - nenhuma nova APK gerada após esta correção.
+
+
+### Painel remoto completo — Build 7
+O painel web aberto pelo GOAT PRO Studio passa a controlar também as configurações do stream, para uso com o celular montado em tripé sem toque local:
+- resolução 720p / 1080p;
+- perfil de qualidade/largura de banda;
+- rotação Automático / 90° / 180° / 270°;
+- conexão automática com o GOAT PRO Studio ligada/desligada;
+- áudio do celular ligado/desligado;
+- mantém troca de câmera, lanterna, zoom, EV, autofoco, ISO e obturador manual.
+As alterações remotas sincronizam os seletores/estado do aplicativo no celular. Mudança somente no APK; o Studio 565 continua usando o mesmo botão de Painel Web.
+APK ainda não recompilado após esta alteração.

@@ -1,1 +1,1 @@
-GOAT Cam Release 1.0.0 authorized build
+GOAT Cam Release 1.0.0 authorized signed build — revision 2\n

@@ -289,3 +289,20 @@ Correção adicional da Build 8:
 - ImageAnalysis passa a solicitar OUTPUT_IMAGE_FORMAT_NV21 diretamente, reduzindo conversão/reorganização de chroma no pipeline;
 - objetivo continua sendo 1920×1080 real próximo de 20 FPS antes de avançar para 2K/4K;
 - APK ainda não compilado após essas alterações.
+
+
+### Painel avançado inspirado no teste comparativo
+Após comparação visual com o painel do IP Webcam Pro, a Build 8 passa a incluir:
+- qualidade JPEG independente de 1 a 100;
+- limite de FPS independente, incluindo modo sem limite;
+- foco automático/manual + distância de foco;
+- balanço de branco;
+- antibanding;
+- modo de cena, incluindo noturno quando suportado;
+- ISO e obturador por sliders;
+- duração do frame manual;
+- abertura e densidade de filtro exibidas somente quando a lente/câmera anunciar valores disponíveis;
+- validação de modos Camera2 suportados antes de aplicar WB/antibanding/cena;
+- controles de lente/sensor preservados ao alternar entre exposição/foco automático e manual.
+
+A Build 8 ainda não foi compilada após essas alterações.

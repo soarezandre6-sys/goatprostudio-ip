@@ -445,3 +445,18 @@ Branch: `build-12-goat-cam`
 - protocolo de descoberta `GOAT_PRO_IP_V1` e `GOAT_PRO_IP_DISCOVER_V1` preservado para compatibilidade com o GOAT PRO Studio;
 - identificadores internos e histórico das builds anteriores não foram apagados;
 - APK Build 12 ainda não gerado.
+
+
+## GOAT Cam 1.0.0 — Release comercial
+Branch: `release-1.0.0-goat-cam`
+
+- primeira versão release do GOAT Cam;
+- versionCode 100 / versionName 1.0.0;
+- Android 16 / compileSdk 36 / targetSdk 36;
+- nome comercial GOAT Cam consolidado;
+- link oficial para https://goatprostudio.com.br preservado;
+- protocolo técnico GOAT_PRO_IP_V1 preservado para compatibilidade com o GOAT PRO Studio;
+- pacote Android `com.goatpro.ip` preservado para continuidade técnica;
+- múltiplas lentes, Full HD, 2K/4K experimentais, MJPEG e H.264/RTSP preservados;
+- saída release preparada para APK e Android App Bundle (AAB);
+- assinatura de produção não será armazenada no GitHub.

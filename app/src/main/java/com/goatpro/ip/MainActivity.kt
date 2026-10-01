@@ -4,12 +4,14 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
 import android.util.Size
 import android.view.OrientationEventListener
@@ -57,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var torchButton: Button
     private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
+    private lateinit var websiteButton: Button
     private lateinit var cameraLensSpinner: Spinner
     private lateinit var resolutionSpinner: Spinner
     private lateinit var qualitySpinner: Spinner
@@ -244,6 +247,7 @@ class MainActivity : AppCompatActivity() {
         torchButton = findViewById(R.id.torchButton)
         audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
+        websiteButton = findViewById(R.id.websiteButton)
         cameraLensSpinner = findViewById(R.id.cameraLensSpinner)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         qualitySpinner = findViewById(R.id.qualitySpinner)
@@ -275,11 +279,30 @@ class MainActivity : AppCompatActivity() {
         torchButton.setOnClickListener { toggleTorch() }
         audioButton.setOnClickListener { toggleAudio() }
         copyAddressButton.setOnClickListener { copyAddressToClipboard() }
+        websiteButton.setOnClickListener { openGoatProStudioWebsite() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun openGoatProStudioWebsite() {
+        try {
+            val intent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://goatprostudio.com.br")
+            ).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(
+                this,
+                "Não foi possível abrir o site neste aparelho.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 

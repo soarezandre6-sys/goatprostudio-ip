@@ -407,3 +407,15 @@ Branch: `build-10-alpha`
 - tamanho APK: 4.833.740 bytes;
 - validação ZIP/APK: sem erros de integridade;
 - recursos confirmados dentro do APK: adaptive launcher icon, marca sem moldura preta, novo layout, cartões, spinner estilizado.
+
+
+## Build 11 — Android 16 + integração comercial
+Branch: `build-11-alpha`
+
+- compileSdk 36;
+- targetSdk 36 (Android 16);
+- versionCode 11 / versionName 0.11.0-alpha;
+- botão interno "Conheça o GOAT PRO Studio" abrindo https://goatprostudio.com.br;
+- identidade visual da Build 10 preservada;
+- múltiplas lentes, 2K/4K experimental e H.264 baixa latência preservados;
+- workflow separado da Build 10.

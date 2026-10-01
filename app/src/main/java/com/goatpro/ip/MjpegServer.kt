@@ -245,7 +245,7 @@ class MjpegServer(
                 img{width:100%;height:auto;background:#000;border-radius:10px}
                 label{display:block;color:#c9d0d8;font-size:12px;margin-top:12px}
                 input[type=range]{width:100%}
-                input[type=number]{width:100%;box-sizing:border-box;padding:9px;background:#080c11;color:#fff;border:1px solid #3a424d;border-radius:7px}
+                input[type=number],select{width:100%;box-sizing:border-box;padding:9px;background:#080c11;color:#fff;border:1px solid #3a424d;border-radius:7px}
                 button{padding:10px 12px;margin:5px 4px 5px 0;border:0;border-radius:8px;background:#F2B620;color:#050505;font-weight:bold;cursor:pointer}
                 button.secondary{background:#28313c;color:#fff}
                 .row{display:flex;gap:8px;flex-wrap:wrap}
@@ -264,6 +264,34 @@ class MjpegServer(
                     <div id="status">Carregando estado da câmera…</div>
                   </div>
                   <div class="panel">
+                    <div class="muted" style="color:#F2B620;font-weight:bold;margin-bottom:6px">TRANSMISSÃO / GOAT PRO STUDIO</div>
+
+                    <label>Resolução</label>
+                    <select id="resolution" onchange="cmd('resolution',this.value)">
+                      <option value="HD">720p</option>
+                      <option value="FHD">1080p</option>
+                    </select>
+
+                    <label>Qualidade / largura de banda</label>
+                    <select id="quality" onchange="cmd('quality',this.value)">
+                      <option value="LOW_LATENCY">Baixa latência · Q50 · 20 FPS</option>
+                      <option value="BALANCED">Equilibrado · Q65 · 20 FPS</option>
+                      <option value="HIGH_QUALITY">Alta qualidade · Q80 · 20 FPS</option>
+                      <option value="MAX_QUALITY">Máxima qualidade · Q90 · 15 FPS</option>
+                    </select>
+
+                    <label>Rotação da imagem</label>
+                    <select id="rotation" onchange="cmd('rotation',this.value)">
+                      <option value="AUTO">Automático</option>
+                      <option value="ROTATE_90">Girar 90° para direita</option>
+                      <option value="ROTATE_180">Girar 180°</option>
+                      <option value="ROTATE_270">Girar 270° / esquerda</option>
+                    </select>
+
+                    <label><input id="autoDiscovery" type="checkbox" onchange="cmd('autoDiscovery',this.checked?'1':'0')"> Conexão automática com o GOAT PRO Studio</label>
+                    <label><input id="audioEnabled" type="checkbox" onchange="cmd('audio',this.checked?'1':'0')"> Áudio do celular</label>
+
+                    <div class="muted" style="color:#F2B620;font-weight:bold;margin-top:16px;margin-bottom:6px">CONTROLES DA CÂMERA</div>
                     <div class="row">
                       <button onclick="cmd('switch')">Trocar câmera</button>
                       <button onclick="cmd('torch')">Lanterna</button>
@@ -305,6 +333,11 @@ class MjpegServer(
                   try{
                     const s=await fetch('/camera/state?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());
                     if(!s.available){document.getElementById('status').textContent='Câmera indisponível';return;}
+                    document.getElementById('resolution').value=s.resolution||'FHD';
+                    document.getElementById('quality').value=s.quality||'BALANCED';
+                    document.getElementById('rotation').value=s.rotation||'AUTO';
+                    document.getElementById('autoDiscovery').checked=!!s.autoDiscovery;
+                    document.getElementById('audioEnabled').checked=!!s.audioEnabled;
                     const z=document.getElementById('zoom');
                     z.min=s.minZoom;z.max=s.maxZoom;z.value=s.zoom;document.getElementById('zoomText').textContent=Number(s.zoom).toFixed(1)+'×';
                     const ev=document.getElementById('ev');
@@ -313,7 +346,12 @@ class MjpegServer(
                     const iso=document.getElementById('iso');iso.min=s.minIso||50;iso.max=s.maxIso||12800;iso.value=s.iso||100;iso.disabled=!s.manualSupported;
                     const sh=document.getElementById('shutter');sh.min=s.minShutterUs||100;sh.max=s.maxShutterUs||1000000;sh.value=s.shutterUs||10000;sh.disabled=!s.manualSupported;
                     document.getElementById('manual').disabled=!s.manualSupported;
-                    document.getElementById('status').textContent='Câmera '+s.camera+' · '+s.width+'×'+s.height+' · '+(s.torch?'lanterna ligada':'lanterna desligada');
+                    document.getElementById('status').textContent=
+                      'Câmera '+s.camera+' · '+s.width+'×'+s.height+
+                      ' · '+(s.qualityLabel||'')+
+                      ' · alvo '+(s.targetFps||'?')+' FPS'+
+                      ' · '+(s.torch?'lanterna ligada':'lanterna desligada')+
+                      (s.manualApplied?' · EXPOSIÇÃO MANUAL ATIVA':'');
                   }catch(e){document.getElementById('status').textContent='Estado indisponível: '+e;}
                 }
                 loadState();

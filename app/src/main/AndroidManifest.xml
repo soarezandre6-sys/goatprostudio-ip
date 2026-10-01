@@ -11,8 +11,8 @@
     <application
         android:allowBackup="true"
         android:label="GOAT PRO IP"
-        android:icon="@drawable/goat_pro_ip_logo"
-        android:roundIcon="@drawable/goat_pro_ip_logo"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.GoatProIP"
         android:usesCleartextTraffic="true">

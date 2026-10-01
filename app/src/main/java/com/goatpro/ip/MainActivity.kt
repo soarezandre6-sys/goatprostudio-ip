@@ -298,6 +298,316 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class CameraLensOption(
+        val key: String,
+        val label: String,
+        val logicalCameraId: String,
+        val physicalCameraId: String?,
+        val facing: Int,
+        val focalMetric: Float,
+        val focalLengthMm: Float?
+    )
+
+    private fun cameraFocalMetric(chars: CameraCharacteristics): Float {
+        val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.minOrNull()
+            ?: return Float.NaN
+        val sensorWidth = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            ?.width
+            ?: return focal
+        if (sensorWidth <= 0f) return focal
+        return focal / sensorWidth
+    }
+
+    private fun cameraFocalLength(chars: CameraCharacteristics): Float? =
+        chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+
+    private fun lensLabel(
+        role: String,
+        focalLengthMm: Float?,
+        suffix: String? = null
+    ): String {
+        val focal = focalLengthMm?.let {
+            " • " + String.format(java.util.Locale.US, "%.1f mm", it)
+        } ?: ""
+        val extra = suffix?.let { " • " + it } ?: ""
+        return role + focal + extra
+    }
+
+    private fun classifyRearRole(
+        metric: Float,
+        mainMetric: Float,
+        fallbackIndex: Int,
+        count: Int
+    ): String {
+        if (!metric.isFinite() || !mainMetric.isFinite() || mainMetric <= 0f) {
+            return when {
+                count >= 3 && fallbackIndex == 0 -> "Ultra-wide"
+                count >= 3 && fallbackIndex == count - 1 -> "Tele"
+                else -> "Traseira principal"
+            }
+        }
+
+        val ratio = metric / mainMetric
+        return when {
+            ratio < 0.82f -> "Ultra-wide"
+            ratio > 1.22f -> "Tele"
+            else -> "Traseira principal"
+        }
+    }
+
+    private fun buildCameraLensOptions(): List<CameraLensOption> {
+        val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val ids = manager.cameraIdList.toList()
+
+        data class RawCamera(
+            val logicalId: String,
+            val physicalId: String?,
+            val facing: Int,
+            val metric: Float,
+            val focal: Float?
+        )
+
+        val raw = mutableListOf<RawCamera>()
+
+        val backLogicalIds = ids.filter { id ->
+            runCatching {
+                manager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) ==
+                    CameraCharacteristics.LENS_FACING_BACK
+            }.getOrDefault(false)
+        }
+
+        val frontIds = ids.filter { id ->
+            runCatching {
+                manager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) ==
+                    CameraCharacteristics.LENS_FACING_FRONT
+            }.getOrDefault(false)
+        }
+
+        val primaryBackId = backLogicalIds.maxByOrNull { id ->
+            if (Build.VERSION.SDK_INT >= 28) {
+                runCatching {
+                    manager.getCameraCharacteristics(id).physicalCameraIds.size
+                }.getOrDefault(0)
+            } else {
+                0
+            }
+        }
+
+        var usedPhysicalBack = false
+        if (primaryBackId != null && Build.VERSION.SDK_INT >= 28) {
+            val logicalChars = runCatching {
+                manager.getCameraCharacteristics(primaryBackId)
+            }.getOrNull()
+
+            val physicalIds = logicalChars?.physicalCameraIds.orEmpty()
+            if (physicalIds.isNotEmpty()) {
+                val physicalRows = physicalIds.mapNotNull { physicalId ->
+                    runCatching {
+                        val chars = manager.getCameraCharacteristics(physicalId)
+                        RawCamera(
+                            logicalId = primaryBackId,
+                            physicalId = physicalId,
+                            facing = CameraCharacteristics.LENS_FACING_BACK,
+                            metric = cameraFocalMetric(chars),
+                            focal = cameraFocalLength(chars)
+                        )
+                    }.getOrNull()
+                }
+
+                if (physicalRows.isNotEmpty()) {
+                    raw.addAll(physicalRows)
+                    usedPhysicalBack = true
+                }
+            }
+        }
+
+        if (!usedPhysicalBack) {
+            backLogicalIds.forEach { id ->
+                runCatching {
+                    val chars = manager.getCameraCharacteristics(id)
+                    raw.add(
+                        RawCamera(
+                            logicalId = id,
+                            physicalId = null,
+                            facing = CameraCharacteristics.LENS_FACING_BACK,
+                            metric = cameraFocalMetric(chars),
+                            focal = cameraFocalLength(chars)
+                        )
+                    )
+                }
+            }
+        }
+
+        frontIds.forEach { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                raw.add(
+                    RawCamera(
+                        logicalId = id,
+                        physicalId = null,
+                        facing = CameraCharacteristics.LENS_FACING_FRONT,
+                        metric = cameraFocalMetric(chars),
+                        focal = cameraFocalLength(chars)
+                    )
+                )
+            }
+        }
+
+        val rear = raw.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
+            .sortedWith(compareBy<RawCamera> {
+                if (it.metric.isFinite()) it.metric else Float.MAX_VALUE
+            })
+
+        val front = raw.filter { it.facing == CameraCharacteristics.LENS_FACING_FRONT }
+
+        val mainMetric = if (rear.isNotEmpty()) {
+            val logicalMetric = primaryBackId?.let { id ->
+                runCatching {
+                    cameraFocalMetric(manager.getCameraCharacteristics(id))
+                }.getOrNull()
+            }
+            if (logicalMetric != null && logicalMetric.isFinite()) {
+                rear.minByOrNull {
+                    kotlin.math.abs(it.metric - logicalMetric)
+                }?.metric ?: rear[rear.size / 2].metric
+            } else {
+                rear[rear.size / 2].metric
+            }
+        } else {
+            Float.NaN
+        }
+
+        val labeled = mutableListOf<CameraLensOption>()
+        rear.forEachIndexed { index, row ->
+            val role = classifyRearRole(row.metric, mainMetric, index, rear.size)
+            labeled.add(
+                CameraLensOption(
+                    key = "",
+                    label = lensLabel(role, row.focal),
+                    logicalCameraId = row.logicalId,
+                    physicalCameraId = row.physicalId,
+                    facing = CameraSelector.LENS_FACING_BACK,
+                    focalMetric = row.metric,
+                    focalLengthMm = row.focal
+                )
+            )
+        }
+
+        front.forEachIndexed { index, row ->
+            val suffix = if (front.size > 1) "Frontal " + (index + 1) else null
+            val role = if (suffix == null) "Frontal" else suffix
+            labeled.add(
+                CameraLensOption(
+                    key = "",
+                    label = lensLabel(role, row.focal),
+                    logicalCameraId = row.logicalId,
+                    physicalCameraId = null,
+                    facing = CameraSelector.LENS_FACING_FRONT,
+                    focalMetric = row.metric,
+                    focalLengthMm = row.focal
+                )
+            )
+        }
+
+        return labeled.mapIndexed { index, option ->
+            option.copy(key = "CAM" + index)
+        }
+    }
+
+    private fun setupCameraLensSelector() {
+        cameraLensOptions = runCatching { buildCameraLensOptions() }
+            .getOrDefault(emptyList())
+
+        if (cameraLensOptions.isEmpty()) {
+            cameraLensOptions = listOf(
+                CameraLensOption(
+                    key = "CAM0",
+                    label = "Traseira",
+                    logicalCameraId = "0",
+                    physicalCameraId = null,
+                    facing = CameraSelector.LENS_FACING_BACK,
+                    focalMetric = Float.NaN,
+                    focalLengthMm = null
+                )
+            )
+        }
+
+        selectedCameraOption =
+            cameraLensOptions.firstOrNull {
+                it.facing == CameraSelector.LENS_FACING_BACK &&
+                    it.label.contains("principal", ignoreCase = true)
+            }
+                ?: cameraLensOptions.firstOrNull {
+                    it.facing == CameraSelector.LENS_FACING_BACK
+                }
+                ?: cameraLensOptions.first()
+
+        lensFacing = selectedCameraOption?.facing ?: CameraSelector.LENS_FACING_BACK
+
+        cameraLensSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            cameraLensOptions.map { it.label }
+        )
+        cameraLensSpinner.setSelection(
+            cameraLensOptions.indexOf(selectedCameraOption).coerceAtLeast(0)
+        )
+
+        cameraLensSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    val option = cameraLensOptions.getOrNull(position) ?: return
+                    selectCameraLens(option, updateSpinner = false)
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+    }
+
+    private fun selectCameraLens(
+        option: CameraLensOption,
+        updateSpinner: Boolean = true
+    ) {
+        if (selectedCameraOption?.key == option.key) return
+
+        if (torchEnabled) {
+            currentCamera?.cameraControl?.enableTorch(false)
+            torchEnabled = false
+        }
+
+        manualExposureEnabled = false
+        manualFocusEnabled = false
+        selectedCameraOption = option
+        lensFacing = option.facing
+
+        if (updateSpinner) {
+            val index = cameraLensOptions.indexOfFirst { it.key == option.key }
+            if (index >= 0 && cameraLensSpinner.selectedItemPosition != index) {
+                cameraLensSpinner.setSelection(index)
+            }
+        }
+
+        refreshResolutionOptions()
+        startCamera()
+    }
+
+    private fun cycleCameraLens() {
+        if (cameraLensOptions.isEmpty()) return
+        val currentIndex = cameraLensOptions.indexOfFirst {
+            it.key == selectedCameraOption?.key
+        }.coerceAtLeast(0)
+        val next = cameraLensOptions[(currentIndex + 1) % cameraLensOptions.size]
+        selectCameraLens(next)
+    }
+
     private fun supportedResolutionPresets(): List<ResolutionPreset> {
         return try {
             val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager

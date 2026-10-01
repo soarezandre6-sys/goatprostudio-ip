@@ -5,7 +5,12 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">#05070A</item>
         <item name="android:navigationBarColor">#05070A</item>
-        <item name="android:windowBackground">#05070A</item>
-        <item name="colorAccent">#F2B620</item>
+        <item name="android:windowBackground">@drawable/bg_screen</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">@color/gold</item>
+        <item name="colorAccent">@color/gold</item>
+        <item name="colorControlActivated">@color/gold</item>
+        <item name="colorControlHighlight">#33F2B620</item>
+        <item name="colorControlNormal">@color/muted</item>
     </style>
 </resources>

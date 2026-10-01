@@ -237,3 +237,30 @@ O painel web aberto pelo GOAT PRO Studio passa a controlar também as configura�
 - mantém troca de câmera, lanterna, zoom, EV, autofoco, ISO e obturador manual.
 As alterações remotas sincronizam os seletores/estado do aplicativo no celular. Mudança somente no APK; o Studio 565 continua usando o mesmo botão de Painel Web.
 APK ainda não recompilado após esta alteração.
+
+
+## Build 8 — Full HD real + 20 FPS
+Branch: `build-8-alpha`
+
+### Diagnóstico da Build 7
+Teste real mostrou:
+- câmera entregando ~29,5–29,6 FPS;
+- perfil Q50 / alvo 20 FPS entregando ~14,8 FPS JPEG;
+- perfil Q90 / alvo 15 FPS entregando ~11,8 FPS JPEG;
+- resolução marcada como 1080p, mas stream real exibido como 1080×608.
+
+### Causas encontradas
+- limitador antigo usava intervalo desde o último quadro aceito; com câmera ~30 FPS e alvo 20 FPS isso aceitava aproximadamente 1 a cada 2 quadros, resultando ~15 FPS;
+- após rotação nativa, o buffer vertical 1080×1920 ainda era forçado por um recorte 16:9 horizontal, produzindo 1080×608;
+- perfil Q50 era internamente limitado para no mínimo Q55.
+
+### Correções
+- agendamento por timeline fixa, permitindo cadência 2-de-3 a partir de 30 FPS para atingir ~20 FPS;
+- recorte 16:9 agora preserva orientação:
+  - horizontal: 1920×1080;
+  - vertical: 1080×1920;
+- qualidade JPEG agora respeita Q50 literalmente;
+- telemetria real de câmera/JPEG/encode/Mbps mantida;
+- versão 0.8.0-alpha;
+- somente APK será necessário nesta rodada;
+- APK ainda não compilado: aguarda autorização explícita.

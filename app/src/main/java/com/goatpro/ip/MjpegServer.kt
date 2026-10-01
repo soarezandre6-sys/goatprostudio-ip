@@ -7,17 +7,34 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-class MjpegServer(private val port: Int = 8080) {
+class MjpegServer(
+    private val port: Int = 8080,
+    private val listener: Listener? = null
+) {
+    interface Listener {
+        fun onVideoClientCountChanged(count: Int)
+    }
+
+    private data class AudioChunk(val sequence: Long, val bytes: ByteArray)
+
     private val running = AtomicBoolean(false)
     private val latestFrame = AtomicReference<ByteArray?>(null)
+    private val latestAudio = AtomicReference<AudioChunk?>(null)
+    private val audioSequence = AtomicLong(0L)
     private val clients = CopyOnWriteArrayList<Socket>()
+    private val videoClients = CopyOnWriteArrayList<Socket>()
     private var serverThread: Thread? = null
     private var serverSocket: ServerSocket? = null
 
     fun offerFrame(jpeg: ByteArray) {
         latestFrame.set(jpeg)
+    }
+
+    fun offerAudio(pcm16le: ByteArray) {
+        latestAudio.set(AudioChunk(audioSequence.incrementAndGet(), pcm16le))
     }
 
     fun start() {
@@ -40,6 +57,7 @@ class MjpegServer(private val port: Int = 8080) {
                 // stop() closes accept(); other failures end the server thread.
             } finally {
                 running.set(false)
+                closeAllClients()
             }
         }.apply {
             name = "goat-ip-server"
@@ -55,27 +73,30 @@ class MjpegServer(private val port: Int = 8080) {
 
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             val requestLine = reader.readLine() ?: return
-            val path = requestLine.split(' ').getOrNull(1) ?: "/"
+            val path = requestLine.split(' ').getOrNull(1)?.substringBefore('?') ?: "/"
             while (true) {
                 val line = reader.readLine() ?: break
                 if (line.isEmpty()) break
             }
 
-            when (path.substringBefore('?')) {
+            when (path) {
                 "/video", "/mjpeg" -> serveMjpeg(socket)
+                "/audio", "/audio.pcm" -> serveAudioPcm(socket)
                 "/snapshot.jpg" -> serveSnapshot(socket)
-                "/health" -> serveText(socket, "200 OK", "application/json", "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\"}")
+                "/health" -> serveHealth(socket)
                 else -> serveHome(socket)
             }
         } catch (_: Exception) {
             // Browser/player disconnected or timed out.
         } finally {
+            removeVideoClient(socket)
             clients.remove(socket)
             runCatching { socket.close() }
         }
     }
 
     private fun serveMjpeg(socket: Socket) {
+        addVideoClient(socket)
         socket.soTimeout = 0
         val out = BufferedOutputStream(socket.getOutputStream(), 256 * 1024)
         out.write(
@@ -105,6 +126,32 @@ class MjpegServer(private val port: Int = 8080) {
         }
     }
 
+    private fun serveAudioPcm(socket: Socket) {
+        socket.soTimeout = 0
+        val out = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
+        out.write(
+            ("HTTP/1.1 200 OK\r\n" +
+                "Cache-Control: no-cache, no-store, must-revalidate\r\n" +
+                "Pragma: no-cache\r\n" +
+                "Access-Control-Allow-Origin: *\r\n" +
+                "Connection: close\r\n" +
+                "Content-Type: audio/x-raw; format=S16LE; rate=${AudioCapture.SAMPLE_RATE}; channels=1\r\n\r\n").toByteArray()
+        )
+        out.flush()
+
+        var lastSequence = -1L
+        while (running.get() && !socket.isClosed) {
+            val chunk = latestAudio.get()
+            if (chunk == null || chunk.sequence == lastSequence) {
+                Thread.sleep(5)
+                continue
+            }
+            lastSequence = chunk.sequence
+            out.write(chunk.bytes)
+            out.flush()
+        }
+    }
+
     private fun serveSnapshot(socket: Socket) {
         val frame = latestFrame.get()
         if (frame == null) {
@@ -122,6 +169,11 @@ class MjpegServer(private val port: Int = 8080) {
         )
         out.write(frame)
         out.flush()
+    }
+
+    private fun serveHealth(socket: Socket) {
+        val body = "{\"status\":\"ok\",\"app\":\"GOAT PRO IP\",\"videoClients\":${videoClients.size}}"
+        serveText(socket, "200 OK", "application/json", body)
     }
 
     private fun serveHome(socket: Socket) {
@@ -152,13 +204,34 @@ class MjpegServer(private val port: Int = 8080) {
         out.flush()
     }
 
+    private fun addVideoClient(socket: Socket) {
+        if (videoClients.addIfAbsent(socket)) {
+            listener?.onVideoClientCountChanged(videoClients.size)
+        }
+    }
+
+    private fun removeVideoClient(socket: Socket) {
+        if (videoClients.remove(socket)) {
+            listener?.onVideoClientCountChanged(videoClients.size)
+        }
+    }
+
+    private fun closeAllClients() {
+        clients.forEach { runCatching { it.close() } }
+        clients.clear()
+        if (videoClients.isNotEmpty()) {
+            videoClients.clear()
+            listener?.onVideoClientCountChanged(0)
+        }
+    }
+
     fun stop() {
         if (!running.compareAndSet(true, false)) return
         runCatching { serverSocket?.close() }
-        clients.forEach { runCatching { it.close() } }
-        clients.clear()
+        closeAllClients()
         serverSocket = null
         latestFrame.set(null)
+        latestAudio.set(null)
     }
 
     fun isRunning(): Boolean = running.get()

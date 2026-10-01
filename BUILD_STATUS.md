@@ -84,3 +84,29 @@ Branch: `build-4-alpha`
 ### Integração Windows
 Branch de teste correspondente: `goat-pro-build-564-ip-integration`.
 A Build 561 estável permanece intacta.
+
+
+## Build 5 — qualidade, latência e rotação
+Branch: `build-5-alpha`
+
+### Implementado
+- herda a descoberta automática e o áudio de rede das Builds 3/4;
+- integração Windows correspondente em `goat-pro-build-565-ip-integration`;
+- correção do Studio para fonte automática preta, publicação imediata do primeiro quadro e reconexão;
+- seleção de resolução com preferência real por 16:9 e alvo 720p/1080p;
+- perfis de qualidade/largura de banda:
+  - baixa latência: JPEG Q78 / 30 FPS;
+  - equilibrado: JPEG Q86 / 30 FPS;
+  - alta qualidade: JPEG Q92 / 24 FPS;
+  - máxima qualidade: JPEG Q95 / 20 FPS;
+- rotação do stream: automático, +90°, +180° e +270°;
+- rotação feita em NV21 antes do JPEG, evitando dupla compressão;
+- cópia otimizada do plano Y para reduzir custo em Full HD;
+- fila de envio MJPEG reduzida para priorizar quadros recentes;
+- exibição da resolução real do stream no aplicativo.
+
+### Próxima validação
+- comparar qualidade/latência em 1080p nos quatro perfis;
+- testar orientação horizontal e vertical;
+- confirmar vídeo automático no GOAT PRO Studio;
+- medir estabilidade antes de considerar 4K.

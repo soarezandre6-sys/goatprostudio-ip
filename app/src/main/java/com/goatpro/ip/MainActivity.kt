@@ -103,6 +103,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var manualControlStatus = "Exposição automática"
 
+    @Volatile
+    private var manualFocusEnabled = false
+
+    @Volatile
+    private var manualFocusDiopters = 0f
+
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {

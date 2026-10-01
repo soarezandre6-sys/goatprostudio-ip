@@ -611,27 +611,25 @@ class MainActivity : AppCompatActivity() {
     private fun supportedResolutionPresets(): List<ResolutionPreset> {
         return try {
             val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val expectedFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                CameraCharacteristics.LENS_FACING_BACK
+            val option = selectedCameraOption
+            val characteristicId =
+                option?.physicalCameraId ?: option?.logicalCameraId
+
+            val sizes = if (characteristicId != null) {
+                manager.getCameraCharacteristics(characteristicId)
+                    .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    ?.getOutputSizes(ImageFormat.YUV_420_888)
+                    ?.toList()
+                    .orEmpty()
             } else {
-                CameraCharacteristics.LENS_FACING_FRONT
+                emptyList()
             }
 
-            val sizes = manager.cameraIdList
-                .mapNotNull { id ->
-                    val chars = manager.getCameraCharacteristics(id)
-                    if (chars.get(CameraCharacteristics.LENS_FACING) != expectedFacing) {
-                        null
-                    } else {
-                        chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                            ?.getOutputSizes(ImageFormat.YUV_420_888)
-                            ?.toList()
-                    }
-                }
-                .flatten()
-
             val supported = ResolutionPreset.entries.filter { preset ->
-                sizes.any { it.width == preset.size.width && it.height == preset.size.height }
+                sizes.any {
+                    it.width == preset.size.width &&
+                        it.height == preset.size.height
+                }
             }
 
             if (supported.isEmpty()) {

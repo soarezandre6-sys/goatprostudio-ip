@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 7 • Full HD otimizado + medição real de FPS"
+                    android:text="Build 8 • Full HD real + 20 FPS corrigido"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -283,7 +283,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 7: rotação nativa + diagnóstico real de FPS/encode + conexão automática opcional + controles web."
+            android:text="Build 8: Full HD vertical/horizontal correto + agendamento de 20 FPS + diagnóstico real."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

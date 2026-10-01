@@ -706,6 +706,9 @@ class MainActivity : AppCompatActivity() {
 
             "focus" -> {
                 if (camera == null || previewView.width <= 0 || previewView.height <= 0) return
+                if (manualFocusEnabled) {
+                    disableManualFocus()
+                }
                 val point = previewView.meteringPointFactory.createPoint(
                     previewView.width / 2f,
                     previewView.height / 2f

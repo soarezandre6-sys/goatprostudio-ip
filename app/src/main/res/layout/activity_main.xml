@@ -44,7 +44,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 6 • automático ou manual + controles web + qualidade"
+                    android:text="Build 7 • Full HD otimizado + medição real de FPS"
                     android:textColor="@color/muted"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -132,6 +132,16 @@
                 android:text="1080p • alvo 30 FPS • MJPEG / Wi-Fi local"
                 android:textColor="@color/muted"
                 android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/performanceText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Desempenho: aguardando transmissão…"
+                android:textColor="@color/green"
+                android:textSize="12sp"
+                android:textStyle="bold" />
 
             <Button
                 android:id="@+id/copyAddressButton"
@@ -273,7 +283,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:text="Build 6: conexão automática opcional + rotação automática + qualidade/latência + painel web de câmera."
+            android:text="Build 7: rotação nativa + diagnóstico real de FPS/encode + conexão automática opcional + controles web."
             android:textColor="@color/muted"
             android:textSize="11sp" />
 

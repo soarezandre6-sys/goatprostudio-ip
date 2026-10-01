@@ -245,6 +245,9 @@ class MjpegServer(
                 img{width:100%;height:auto;background:#000;border-radius:10px}
                 label{display:block;color:#c9d0d8;font-size:12px;margin-top:12px}
                 input[type=range]{width:100%}
+                .rangeHead{display:flex;justify-content:space-between;gap:10px;align-items:center}
+                .rangeLimits{color:#7f8995;font-size:11px;margin-top:2px}
+                .rangeValue{color:#F2B620;font-weight:bold}
                 input[type=number],select{width:100%;box-sizing:border-box;padding:9px;background:#080c11;color:#fff;border:1px solid #3a424d;border-radius:7px}
                 button{padding:10px 12px;margin:5px 4px 5px 0;border:0;border-radius:8px;background:#F2B620;color:#050505;font-weight:bold;cursor:pointer}
                 button.secondary{background:#28313c;color:#fff}
@@ -306,11 +309,23 @@ class MjpegServer(
 
                     <label><input id="manual" type="checkbox" onchange="cmd('manual',this.checked?'1':'0')"> Exposição manual (quando suportada)</label>
 
-                    <label>ISO</label>
-                    <input id="iso" type="number" value="100" onchange="cmd('iso',this.value)">
+                    <label class="rangeHead">
+                      <span>ISO</span>
+                      <span class="rangeValue" id="isoText">ISO 100</span>
+                    </label>
+                    <input id="iso" type="range" min="50" max="12800" step="1" value="100"
+                           oninput="isoText.textContent='ISO '+this.value"
+                           onchange="cmd('iso',this.value)">
+                    <div class="rangeLimits" id="isoLimits">Faixa da câmera: aguardando…</div>
 
-                    <label>Tempo de exposição · microssegundos (ex.: 10000 = 1/100 s)</label>
-                    <input id="shutter" type="number" value="10000" onchange="cmd('shutterUs',this.value)">
+                    <label class="rangeHead">
+                      <span>Tempo de exposição</span>
+                      <span class="rangeValue" id="shutterText">1/100 s</span>
+                    </label>
+                    <input id="shutter" type="range" min="0" max="1000" step="1" value="500"
+                           oninput="previewShutter(this.value)"
+                           onchange="applyShutter(this.value)">
+                    <div class="rangeLimits" id="shutterLimits">Faixa da câmera: aguardando…</div>
 
                     <div class="row" style="margin-top:10px">
                       <button class="secondary" onclick="cmd('manual','0')">Voltar exposição automática</button>
@@ -320,6 +335,41 @@ class MjpegServer(
                 </div>
               </div>
               <script>
+                let shutterMinUs=100;
+                let shutterMaxUs=1000000;
+
+                function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+                function sliderToShutterUs(pos){
+                  const min=Math.max(1,Number(shutterMinUs)||1);
+                  const max=Math.max(min,Number(shutterMaxUs)||min);
+                  const t=clamp(Number(pos)/1000,0,1);
+                  return Math.round(Math.exp(Math.log(min)+(Math.log(max)-Math.log(min))*t));
+                }
+                function shutterUsToSlider(us){
+                  const min=Math.max(1,Number(shutterMinUs)||1);
+                  const max=Math.max(min,Number(shutterMaxUs)||min);
+                  const v=clamp(Number(us)||min,min,max);
+                  if(max===min)return 0;
+                  return Math.round(1000*(Math.log(v)-Math.log(min))/(Math.log(max)-Math.log(min)));
+                }
+                function formatShutter(us){
+                  const v=Math.max(1,Number(us)||1);
+                  if(v>=1000000)return (v/1000000).toFixed(v%1000000===0?0:2)+' s';
+                  const denom=Math.round(1000000/v);
+                  if(denom>=2)return '1/'+denom+' s';
+                  if(v>=1000)return (v/1000).toFixed(1)+' ms';
+                  return Math.round(v)+' µs';
+                }
+                function previewShutter(pos){
+                  const us=sliderToShutterUs(pos);
+                  document.getElementById('shutterText').textContent=formatShutter(us)+' · '+us+' µs';
+                }
+                async function applyShutter(pos){
+                  const us=sliderToShutterUs(pos);
+                  document.getElementById('shutterText').textContent=formatShutter(us)+' · '+us+' µs';
+                  await cmd('shutterUs',String(us));
+                }
+
                 async function cmd(action,value){
                   try{
                     const q='/camera/control?action='+encodeURIComponent(action)+(value===undefined?'':'&value='+encodeURIComponent(value));
@@ -343,8 +393,24 @@ class MjpegServer(
                     const ev=document.getElementById('ev');
                     ev.min=s.minEv;ev.max=s.maxEv;ev.value=s.ev;document.getElementById('evText').textContent=s.ev;
                     document.getElementById('manual').checked=!!s.manual;
-                    const iso=document.getElementById('iso');iso.min=s.minIso||50;iso.max=s.maxIso||12800;iso.value=s.iso||100;iso.disabled=!s.manualSupported;
-                    const sh=document.getElementById('shutter');sh.min=s.minShutterUs||100;sh.max=s.maxShutterUs||1000000;sh.value=s.shutterUs||10000;sh.disabled=!s.manualSupported;
+                    const iso=document.getElementById('iso');
+                    const minIso=Number(s.minIso||50), maxIso=Number(s.maxIso||12800), curIso=Number(s.iso||minIso);
+                    iso.min=minIso;iso.max=maxIso;
+                    iso.step=Math.max(1,Math.round((maxIso-minIso)/500));
+                    iso.value=clamp(curIso,minIso,maxIso);
+                    iso.disabled=!s.manualSupported;
+                    document.getElementById('isoText').textContent='ISO '+Math.round(iso.value);
+                    document.getElementById('isoLimits').textContent='Faixa da câmera: ISO '+minIso+' – '+maxIso;
+
+                    shutterMinUs=Math.max(1,Number(s.minShutterUs||100));
+                    shutterMaxUs=Math.max(shutterMinUs,Number(s.maxShutterUs||1000000));
+                    const curShutter=clamp(Number(s.shutterUs||10000),shutterMinUs,shutterMaxUs);
+                    const sh=document.getElementById('shutter');
+                    sh.value=shutterUsToSlider(curShutter);
+                    sh.disabled=!s.manualSupported;
+                    document.getElementById('shutterText').textContent=formatShutter(curShutter)+' · '+Math.round(curShutter)+' µs';
+                    document.getElementById('shutterLimits').textContent=
+                      'Faixa da câmera: '+formatShutter(shutterMinUs)+' – '+formatShutter(shutterMaxUs);
                     document.getElementById('manual').disabled=!s.manualSupported;
                     document.getElementById('status').textContent=
                       'Câmera '+s.camera+' · '+s.width+'×'+s.height+

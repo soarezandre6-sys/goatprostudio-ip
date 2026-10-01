@@ -842,7 +842,21 @@ class MainActivity : AppCompatActivity() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             val provider = providerFuture.get()
-            val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            val cameraOption = selectedCameraOption
+            val selector = if (cameraOption != null) {
+                CameraSelector.Builder()
+                    .addCameraFilter { cameraInfos ->
+                        cameraInfos.filter { cameraInfo ->
+                            runCatching {
+                                Camera2CameraInfo.from(cameraInfo).cameraId ==
+                                    cameraOption.logicalCameraId
+                            }.getOrDefault(false)
+                        }
+                    }
+                    .build()
+            } else {
+                CameraSelector.Builder().requireLensFacing(lensFacing).build()
+            }
             val size = selectedPreset.size
             val targetRotation = if (selectedRotationMode == RotationMode.AUTO) {
                 autoSurfaceRotation
@@ -866,18 +880,29 @@ class MainActivity : AppCompatActivity() {
                 )
                 .build()
 
-            val preview = Preview.Builder()
+            val previewBuilder = Preview.Builder()
                 .setResolutionSelector(resolutionSelector)
                 .setTargetRotation(targetRotation)
-                .build()
-                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-            val analysis = ImageAnalysis.Builder()
+            val analysisBuilder = ImageAnalysis.Builder()
                 .setResolutionSelector(resolutionSelector)
                 .setTargetRotation(targetRotation)
                 .setOutputImageRotationEnabled(true)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+
+            cameraOption?.physicalCameraId?.let { physicalId ->
+                Camera2Interop.Extender(previewBuilder)
+                    .setPhysicalCameraId(physicalId)
+                Camera2Interop.Extender(analysisBuilder)
+                    .setPhysicalCameraId(physicalId)
+            }
+
+            val preview = previewBuilder
+                .build()
+                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+
+            val analysis = analysisBuilder
                 .build()
                 .also { useCase ->
                     useCase.setAnalyzer(cameraExecutor) { image ->

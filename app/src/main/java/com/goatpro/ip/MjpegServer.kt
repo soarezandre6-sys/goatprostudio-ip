@@ -325,6 +325,47 @@ class MjpegServer(
                     <label>Compensação de exposição (EV) · <span class="value" id="evText">0</span></label>
                     <input id="ev" type="range" min="-4" max="4" step="1" value="0" oninput="evText.textContent=this.value" onchange="cmd('ev',this.value)">
 
+                    <label>Balanço de branco</label>
+                    <select id="whiteBalance" onchange="cmd('whiteBalance',this.value)">
+                      <option value="AUTO">Automático</option>
+                      <option value="DAYLIGHT">Luz do dia</option>
+                      <option value="CLOUDY_DAYLIGHT">Nublado</option>
+                      <option value="SHADE">Sombra</option>
+                      <option value="INCANDESCENT">Incandescente</option>
+                      <option value="FLUORESCENT">Fluorescente</option>
+                      <option value="WARM_FLUORESCENT">Fluorescente quente</option>
+                      <option value="TWILIGHT">Crepúsculo</option>
+                    </select>
+
+                    <label>Antibanding</label>
+                    <select id="antibanding" onchange="cmd('antibanding',this.value)">
+                      <option value="AUTO">Automático</option>
+                      <option value="50HZ">50 Hz</option>
+                      <option value="60HZ">60 Hz</option>
+                      <option value="OFF">Desligado</option>
+                    </select>
+
+                    <label>Modo de cena</label>
+                    <select id="sceneMode" onchange="cmd('sceneMode',this.value)">
+                      <option value="AUTO">Automático</option>
+                      <option value="NIGHT">Noturno</option>
+                      <option value="ACTION">Ação</option>
+                      <option value="PORTRAIT">Retrato</option>
+                      <option value="LANDSCAPE">Paisagem</option>
+                      <option value="NIGHT_PORTRAIT">Retrato noturno</option>
+                      <option value="SPORTS">Esportes</option>
+                    </select>
+
+                    <div id="apertureWrap">
+                      <label>Abertura da lente</label>
+                      <select id="aperture" onchange="cmd('aperture',this.value)"></select>
+                    </div>
+
+                    <div id="filterDensityWrap">
+                      <label>Densidade de filtro</label>
+                      <select id="filterDensity" onchange="cmd('filterDensity',this.value)"></select>
+                    </div>
+
                     <label><input id="manualFocus" type="checkbox" onchange="cmd('focusMode',this.checked?'manual':'auto')"> Foco manual</label>
                     <label class="rangeHead">
                       <span>Distância de foco</span>
@@ -355,6 +396,15 @@ class MjpegServer(
                            onchange="applyShutter(this.value)">
                     <div class="rangeLimits" id="shutterLimits">Faixa da câmera: aguardando…</div>
 
+                    <label class="rangeHead">
+                      <span>Duração do frame</span>
+                      <span class="rangeValue" id="frameDurationText">Automático</span>
+                    </label>
+                    <input id="frameDuration" type="range" min="0" max="1000" step="1" value="0"
+                           oninput="previewFrameDuration(this.value)"
+                           onchange="applyFrameDuration(this.value)">
+                    <div class="rangeLimits" id="frameDurationLimits">0 = automático conforme FPS</div>
+
                     <div class="row" style="margin-top:10px">
                       <button class="secondary" onclick="cmd('manual','0')">Voltar exposição automática</button>
                     </div>
@@ -365,6 +415,49 @@ class MjpegServer(
               <script>
                 let shutterMinUs=100;
                 let shutterMaxUs=1000000;
+                let maxFrameDurationUs=1000000;
+
+                function sliderToFrameDurationUs(pos){
+                  const p=Number(pos);
+                  if(p<=0)return 0;
+                  const min=1000;
+                  const max=Math.max(min,Number(maxFrameDurationUs)||1000000);
+                  const t=clamp(p/1000,0,1);
+                  return Math.round(Math.exp(Math.log(min)+(Math.log(max)-Math.log(min))*t));
+                }
+                function frameDurationUsToSlider(us){
+                  const v=Number(us)||0;
+                  if(v<=0)return 0;
+                  const min=1000;
+                  const max=Math.max(min,Number(maxFrameDurationUs)||1000000);
+                  return Math.round(1000*clamp((Math.log(clamp(v,min,max))-Math.log(min))/(Math.log(max)-Math.log(min)),0,1));
+                }
+                function previewFrameDuration(pos){
+                  const us=sliderToFrameDurationUs(pos);
+                  document.getElementById('frameDurationText').textContent=
+                    us<=0?'Automático':formatShutter(us);
+                }
+                async function applyFrameDuration(pos){
+                  const us=sliderToFrameDurationUs(pos);
+                  document.getElementById('frameDurationText').textContent=
+                    us<=0?'Automático':formatShutter(us);
+                  await cmd('frameDurationUs',String(us));
+                }
+
+                function fillSelectFromCsv(id,csv,current){
+                  const el=document.getElementById(id);
+                  if(!el)return 0;
+                  const vals=String(csv||'').split(',').map(v=>v.trim()).filter(Boolean);
+                  el.innerHTML='';
+                  vals.forEach(v=>{
+                    const o=document.createElement('option');
+                    o.value=v;o.textContent=v;el.appendChild(o);
+                  });
+                  if(vals.length && current!==undefined && current!==null){
+                    el.value=String(current);
+                  }
+                  return vals.length;
+                }
 
                 function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
                 function sliderToShutterUs(pos){
@@ -461,6 +554,22 @@ class MjpegServer(
                     const ev=document.getElementById('ev');
                     ev.min=s.minEv;ev.max=s.maxEv;ev.value=s.ev;document.getElementById('evText').textContent=s.ev;
 
+                    document.getElementById('whiteBalance').value=s.whiteBalance||'AUTO';
+                    document.getElementById('antibanding').value=s.antibanding||'AUTO';
+                    document.getElementById('sceneMode').value=s.sceneMode||'AUTO';
+
+                    const apertureCount=fillSelectFromCsv(
+                      'aperture',s.aperturesCsv,
+                      Number(s.selectedAperture)>=0?s.selectedAperture:undefined
+                    );
+                    document.getElementById('apertureWrap').style.display=apertureCount>1?'block':'none';
+
+                    const filterCount=fillSelectFromCsv(
+                      'filterDensity',s.filterDensitiesCsv,
+                      Number(s.selectedFilterDensity)>=0?s.selectedFilterDensity:undefined
+                    );
+                    document.getElementById('filterDensityWrap').style.display=filterCount>1?'block':'none';
+
                     maxFocusDiopters=Math.max(0,Number(s.maxFocusDiopters||0));
                     const mf=document.getElementById('manualFocus');
                     const fd=document.getElementById('focusDistance');
@@ -494,6 +603,14 @@ class MjpegServer(
                     document.getElementById('shutterText').textContent=formatShutter(curShutter)+' · '+Math.round(curShutter)+' µs';
                     document.getElementById('shutterLimits').textContent=
                       'Faixa da câmera: '+formatShutter(shutterMinUs)+' – '+formatShutter(shutterMaxUs);
+                    maxFrameDurationUs=Math.max(1000,Number(s.maxFrameDurationUs||1000000));
+                    const fdur=document.getElementById('frameDuration');
+                    fdur.value=frameDurationUsToSlider(Number(s.frameDurationUs||0));
+                    fdur.disabled=!s.manualSupported;
+                    document.getElementById('frameDurationText').textContent=
+                      Number(s.frameDurationUs||0)<=0?'Automático':formatShutter(Number(s.frameDurationUs));
+                    document.getElementById('frameDurationLimits').textContent=
+                      'Automático ou até '+formatShutter(maxFrameDurationUs);
                     document.getElementById('manual').disabled=!s.manualSupported;
                     document.getElementById('status').textContent=
                       'Câmera '+s.camera+' · '+s.width+'×'+s.height+

@@ -24,7 +24,7 @@ object ImageUtils {
         if (image.format != ImageFormat.YUV_420_888) return null
 
         val nv21 = yuv420ToNv21(image)
-        val crop = centeredLandscape16x9Crop(image.width, image.height)
+        val crop = centered16x9CropPreservingOrientation(image.width, image.height)
         val cropped = cropNv21(nv21, image.width, image.height, crop)
 
         val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
@@ -48,7 +48,7 @@ object ImageUtils {
 
         val ok = yuvImage.compressToJpeg(
             Rect(0, 0, rotated.width, rotated.height),
-            quality.coerceIn(55, 97),
+            quality.coerceIn(1, 100),
             output
         )
         return if (ok) {
@@ -68,17 +68,30 @@ object ImageUtils {
      * CameraX can negotiate a 4:3 analysis buffer even when FHD/HD is requested.
      * Crop centrally to 16:9 before encoding so the stream never becomes square-ish.
      */
-    private fun centeredLandscape16x9Crop(width: Int, height: Int): Rect {
+    private fun centered16x9CropPreservingOrientation(width: Int, height: Int): Rect {
         if (width <= 0 || height <= 0) return Rect(0, 0, width, height)
 
         var cropWidth = width and -2
         var cropHeight = height and -2
+
+        // CameraX rotates the ImageProxy when output rotation is enabled. A phone held
+        // vertically therefore arrives as portrait (for example 1080x1920). Preserve
+        // that orientation instead of forcing a landscape 16:9 crop such as 1080x608.
+        val targetAspect = if (cropWidth >= cropHeight) {
+            TARGET_ASPECT
+        } else {
+            1f / TARGET_ASPECT
+        }
         val currentAspect = cropWidth.toFloat() / cropHeight.toFloat()
 
-        if (currentAspect < TARGET_ASPECT) {
-            cropHeight = (cropWidth / TARGET_ASPECT).roundToInt().coerceAtMost(cropHeight) and -2
-        } else if (currentAspect > TARGET_ASPECT) {
-            cropWidth = (cropHeight * TARGET_ASPECT).roundToInt().coerceAtMost(cropWidth) and -2
+        if (currentAspect < targetAspect) {
+            cropHeight = (cropWidth / targetAspect)
+                .roundToInt()
+                .coerceAtMost(cropHeight) and -2
+        } else if (currentAspect > targetAspect) {
+            cropWidth = (cropHeight * targetAspect)
+                .roundToInt()
+                .coerceAtMost(cropWidth) and -2
         }
 
         cropWidth = cropWidth.coerceAtLeast(2)

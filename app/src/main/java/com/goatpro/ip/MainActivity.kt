@@ -271,6 +271,7 @@ class MainActivity : AppCompatActivity() {
             server.setAudioEnabled(true)
             if (server.isRunning() && !audioCapture.start()) {
                 audioEnabled = false
+                server.setAudioEnabled(false)
                 Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
             }
             updateAudioButton()

@@ -60,6 +60,14 @@ class MainActivity : AppCompatActivity() {
         AudioCapture(this, server::offerAudio)
     }
 
+    private val discoveryResponder by lazy {
+        DiscoveryResponder(
+            httpPort = 8080,
+            isStreaming = { server.isRunning() },
+            isAudioEnabled = { audioEnabled && server.isAudioEnabled() }
+        )
+    }
+
     private val cameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -74,9 +82,11 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         audioEnabled = granted
+        server.setAudioEnabled(granted)
         if (granted && server.isRunning()) {
             if (!audioCapture.start()) {
                 audioEnabled = false
+                server.setAudioEnabled(false)
                 Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
             }
         }
@@ -110,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         updateConnectionStatus(0)
         updateAudioButton()
         updateTorchButton()
+        discoveryResponder.start()
 
         streamButton.setOnClickListener {
             if (server.isRunning()) stopStreaming() else startStreaming()
@@ -249,6 +260,7 @@ class MainActivity : AppCompatActivity() {
     private fun toggleAudio() {
         if (audioEnabled) {
             audioEnabled = false
+            server.setAudioEnabled(false)
             audioCapture.stop()
             updateAudioButton()
             return
@@ -256,6 +268,7 @@ class MainActivity : AppCompatActivity() {
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             audioEnabled = true
+            server.setAudioEnabled(true)
             if (server.isRunning() && !audioCapture.start()) {
                 audioEnabled = false
                 Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
@@ -292,8 +305,10 @@ class MainActivity : AppCompatActivity() {
 
         refreshAddress()
         server.start()
+        server.setAudioEnabled(audioEnabled)
         if (audioEnabled && !audioCapture.start()) {
             audioEnabled = false
+            server.setAudioEnabled(false)
             updateAudioButton()
             Toast.makeText(this, "Vídeo iniciado sem áudio.", Toast.LENGTH_SHORT).show()
         }
@@ -307,6 +322,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopStreaming() {
         audioCapture.stop()
+        server.setAudioEnabled(false)
         server.stop()
         lastEncodedFrameNs = 0L
         setReadyState()
@@ -378,7 +394,9 @@ class MainActivity : AppCompatActivity() {
         if (torchEnabled) {
             currentCamera?.cameraControl?.enableTorch(false)
         }
+        discoveryResponder.stop()
         audioCapture.stop()
+        server.setAudioEnabled(false)
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()

@@ -10,17 +10,22 @@ import java.io.ByteArrayOutputStream
 object ImageUtils {
     private const val TARGET_ASPECT = 16f / 9f
 
+    data class Nv21Frame(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int
+    )
+
     data class JpegFrame(
         val bytes: ByteArray,
         val width: Int,
         val height: Int
     )
 
-    fun imageProxyToJpeg(
+    fun imageProxyToNv21(
         image: ImageProxy,
-        quality: Int = 85,
         rotationDegrees: Int = image.imageInfo.rotationDegrees
-    ): JpegFrame? {
+    ): Nv21Frame? {
         if (image.format != ImageFormat.YUV_420_888) return null
 
         val nv21 = yuv420ToNv21(image)
@@ -28,41 +33,49 @@ object ImageUtils {
         val cropped = cropNv21(nv21, image.width, image.height, crop)
 
         val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
-        val rotated = rotateNv21(
+        return rotateNv21(
             cropped.bytes,
             cropped.width,
             cropped.height,
             normalizedRotation
         )
+    }
 
+    fun nv21ToJpeg(
+        frame: Nv21Frame,
+        quality: Int = 85
+    ): JpegFrame? {
         val output = ByteArrayOutputStream(
-            (rotated.width * rotated.height / 3).coerceAtLeast(64 * 1024)
+            (frame.width * frame.height / 3).coerceAtLeast(64 * 1024)
         )
         val yuvImage = YuvImage(
-            rotated.bytes,
+            frame.bytes,
             ImageFormat.NV21,
-            rotated.width,
-            rotated.height,
+            frame.width,
+            frame.height,
             null
         )
 
         val ok = yuvImage.compressToJpeg(
-            Rect(0, 0, rotated.width, rotated.height),
+            Rect(0, 0, frame.width, frame.height),
             quality.coerceIn(1, 100),
             output
         )
         return if (ok) {
-            JpegFrame(output.toByteArray(), rotated.width, rotated.height)
+            JpegFrame(output.toByteArray(), frame.width, frame.height)
         } else {
             null
         }
     }
 
-    private data class Nv21Frame(
-        val bytes: ByteArray,
-        val width: Int,
-        val height: Int
-    )
+    fun imageProxyToJpeg(
+        image: ImageProxy,
+        quality: Int = 85,
+        rotationDegrees: Int = image.imageInfo.rotationDegrees
+    ): JpegFrame? {
+        val frame = imageProxyToNv21(image, rotationDegrees) ?: return null
+        return nv21ToJpeg(frame, quality)
+    }
 
     /**
      * CameraX can negotiate a 4:3 analysis buffer even when FHD/HD is requested.

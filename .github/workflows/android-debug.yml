@@ -3,9 +3,9 @@ name: Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [ build-11-alpha ]
+    branches: [ build-12-goat-cam ]
     paths:
-      - ".github/build-11.trigger"
+      - ".github/build-12.trigger"
 
 jobs:
   build:
@@ -23,5 +23,5 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: goat-pro-ip-build-11-debug
+          name: goat-cam-build-12-debug
           path: app/build/outputs/apk/debug/app-debug.apk

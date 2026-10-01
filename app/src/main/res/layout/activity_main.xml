@@ -4,37 +4,55 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="@color/bg">
+    android:overScrollMode="never"
+    android:background="@drawable/bg_screen">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="18dp">
+        android:paddingStart="16dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp">
 
-            <ImageView
+            <FrameLayout
                 android:layout_width="72dp"
                 android:layout_height="72dp"
-                android:contentDescription="Logo GOAT PRO IP"
-                android:scaleType="fitCenter"
-                android:src="@drawable/goat_pro_ip_logo" />
+                android:background="@drawable/bg_logo_badge"
+                android:clipToOutline="true"
+                android:elevation="9dp"
+                android:outlineProvider="background"
+                android:padding="7dp">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="Logo GOAT PRO IP"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/goat_pro_ip_mark" />
+            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
+                android:layout_marginStart="15dp"
                 android:layout_weight="1"
                 android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.02"
                     android:text="GOAT PRO IP"
                     android:textColor="@color/gold"
                     android:textSize="27sp"
@@ -44,33 +62,55 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Build 9 • H.264 baixa latência"
+                    android:text="Câmera IP profissional para o GOAT PRO Studio"
                     android:textColor="@color/muted"
-                    android:textSize="13sp" />
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="BUILD 10 • MULTI-LENTE • 2K / 4K EXP."
+                    android:textColor="@color/gold_soft"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
             </LinearLayout>
         </LinearLayout>
 
-        <androidx.camera.view.PreviewView
-            android:id="@+id/previewView"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="260dp"
-            android:layout_marginTop="16dp"
-            android:background="#000000"
-            app:implementationMode="performance"
-            app:scaleType="fitCenter" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_preview_frame"
+            android:clipToOutline="true"
+            android:elevation="10dp"
+            android:outlineProvider="background"
+            android:padding="2dp">
+
+            <androidx.camera.view.PreviewView
+                android:id="@+id/previewView"
+                android:layout_width="match_parent"
+                android:layout_height="250dp"
+                android:background="#000000"
+                app:implementationMode="performance"
+                app:scaleType="fitCenter" />
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@color/panel"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card_status"
+            android:elevation="7dp"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="16dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="VÍNCULO COM O GOAT PRO STUDIO"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:text="CONEXÃO COM O STUDIO"
                 android:textColor="@color/gold"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -79,10 +119,10 @@
                 android:id="@+id/statusText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="10dp"
                 android:text="PRONTO PARA TRANSMITIR"
                 android:textColor="@color/green"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -99,17 +139,19 @@
                 android:id="@+id/autoDiscoverySwitch"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:checked="true"
                 android:text="Conexão automática com o GOAT PRO Studio: LIGADA"
                 android:textColor="@color/text"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                app:thumbTint="@color/gold"
+                app:trackTint="@color/line" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Desligada: o vídeo e o áudio continuam disponíveis pelo IP, mas o celular não se anuncia automaticamente ao Studio."
+                android:layout_marginTop="5dp"
+                android:text="Desligada: o stream continua pelo IP, mas este celular deixa de se anunciar automaticamente."
                 android:textColor="@color/muted"
                 android:textSize="11sp" />
 
@@ -117,18 +159,20 @@
                 android:id="@+id/addressText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_address"
+                android:fontFamily="monospace"
                 android:text="http://0.0.0.0:8080/video"
                 android:textColor="@color/text"
                 android:textIsSelectable="true"
-                android:textSize="16sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/streamInfoText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
+                android:layout_marginTop="9dp"
                 android:text="1080p • alvo 30 FPS • MJPEG / Wi-Fi local"
                 android:textColor="@color/muted"
                 android:textSize="12sp" />
@@ -146,25 +190,35 @@
             <Button
                 android:id="@+id/copyAddressButton"
                 android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginTop="10dp"
-                android:backgroundTint="@color/panel_2"
-                android:text="Copiar endereço"
-                android:textColor="@color/text" />
+                android:layout_height="46dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_button_round"
+                android:backgroundTint="@color/panel_3"
+                android:elevation="4dp"
+                android:minHeight="0dp"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:text="Copiar endereços"
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@color/panel"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card_raised"
+            android:elevation="7dp"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="16dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="CONFIGURAÇÕES DA CÂMERA"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:text="CÂMERA E TRANSMISSÃO"
                 android:textColor="@color/gold"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -172,93 +226,112 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:text="Câmera / lente"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp"
+                android:textStyle="bold" />
 
             <Spinner
                 android:id="@+id/cameraLensSpinner"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:backgroundTint="@color/gold" />
+                android:layout_height="50dp"
+                android:layout_marginTop="5dp"
+                android:background="@drawable/bg_input"
+                android:popupBackground="@color/panel_2" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:text="Resolução"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp"
+                android:textStyle="bold" />
 
             <Spinner
                 android:id="@+id/resolutionSpinner"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:backgroundTint="@color/gold" />
+                android:layout_height="50dp"
+                android:layout_marginTop="5dp"
+                android:background="@drawable/bg_input"
+                android:popupBackground="@color/panel_2" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:text="Qualidade / largura de banda"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp"
+                android:textStyle="bold" />
 
             <Spinner
                 android:id="@+id/qualitySpinner"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:backgroundTint="@color/gold" />
+                android:layout_height="50dp"
+                android:layout_marginTop="5dp"
+                android:background="@drawable/bg_input"
+                android:popupBackground="@color/panel_2" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:text="Rotação da imagem transmitida"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp"
+                android:textStyle="bold" />
 
             <Spinner
                 android:id="@+id/rotationSpinner"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:backgroundTint="@color/gold" />
+                android:layout_height="50dp"
+                android:layout_marginTop="5dp"
+                android:background="@drawable/bg_input"
+                android:popupBackground="@color/panel_2" />
 
             <Button
                 android:id="@+id/switchCameraButton"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:backgroundTint="@color/panel_2"
+                android:layout_height="50dp"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_button_round"
+                android:backgroundTint="@color/panel_3"
+                android:elevation="4dp"
                 android:text="Próxima câmera / lente"
-                android:textColor="@color/text" />
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textStyle="bold" />
 
             <Button
                 android:id="@+id/torchButton"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="@color/panel_2"
+                android:layout_height="50dp"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/bg_button_round"
+                android:backgroundTint="@color/panel_3"
+                android:elevation="4dp"
                 android:text="Lanterna: desligada"
-                android:textColor="@color/text" />
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@color/panel"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card_raised"
+            android:elevation="7dp"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="16dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
                 android:text="ÁUDIO"
                 android:textColor="@color/gold"
                 android:textSize="12sp"
@@ -267,7 +340,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="7dp"
                 android:text="O microfone é opcional. Com o áudio desligado, a transmissão continua somente em vídeo."
                 android:textColor="@color/muted"
                 android:textSize="12sp" />
@@ -275,20 +348,26 @@
             <Button
                 android:id="@+id/audioButton"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="@color/panel_2"
+                android:layout_height="50dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_button_round"
+                android:backgroundTint="@color/panel_3"
+                android:elevation="4dp"
                 android:text="Áudio: desligado"
-                android:textColor="@color/text" />
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <Button
             android:id="@+id/streamButton"
             android:layout_width="match_parent"
-            android:layout_height="58dp"
-            android:layout_marginTop="14dp"
-            android:backgroundTint="@color/gold"
+            android:layout_height="62dp"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_button_primary"
+            android:elevation="10dp"
             android:text="Iniciar transmissão"
+            android:textAllCaps="false"
             android:textColor="@color/black"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -296,11 +375,11 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="13dp"
             android:gravity="center"
-            android:text="Build 10: múltiplas lentes + H.264 baixa latência + 2K/4K experimentais."
+            android:text="GOAT PRO IP • Build 10 experimental"
             android:textColor="@color/muted"
-            android:textSize="11sp" />
+            android:textSize="10sp" />
 
     </LinearLayout>
 </ScrollView>

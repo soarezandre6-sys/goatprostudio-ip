@@ -329,6 +329,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             updateAutomaticDiscoveryText()
+            updateConnectionStatus(server.videoClientCount())
             Toast.makeText(
                 this,
                 if (checked) {

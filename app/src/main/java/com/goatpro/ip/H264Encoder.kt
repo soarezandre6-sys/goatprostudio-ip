@@ -45,7 +45,7 @@ class H264Encoder(
     fun ensureStarted(width: Int, height: Int, fps: Int, bitrate: Int): Boolean {
         val safeWidth = width and -2
         val safeHeight = height and -2
-        val safeFps = fps.coerceIn(5, 60)
+        val safeFps = fps.coerceIn(5, 120)
         val safeBitrate = bitrate.coerceIn(500_000, 40_000_000)
 
         synchronized(lock) {
@@ -312,7 +312,9 @@ class H264Encoder(
 
             val ceiling = when {
                 pixels >= 3840L * 2160L -> 18_000_000L
-                pixels >= 2560L * 1440L -> 14_000_000L
+                pixels >= 2560L * 1440L -> 20_000_000L
+                fps >= 100 -> 32_000_000L
+                fps >= 60 -> 22_000_000L
                 else -> 12_000_000L
             }
 

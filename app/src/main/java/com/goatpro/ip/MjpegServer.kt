@@ -295,10 +295,10 @@ class MjpegServer(
                       <span>Limite de FPS</span>
                       <span class="rangeValue" id="fpsLimitText">20 FPS</span>
                     </label>
-                    <input id="fpsLimit" type="range" min="0" max="30" step="1" value="20"
+                    <input id="fpsLimit" type="range" min="0" max="120" step="1" value="20"
                            oninput="fpsLimitText.textContent=(this.value==='0'?'Sem limite':this.value+' FPS')"
                            onchange="cmd('fpsLimit',this.value)">
-                    <div class="rangeLimits">0 = sem limite · útil para medir o máximo real do aparelho</div>
+                    <div class="rangeLimits" id="fpsLimits">0 = sem limite · máximo lido da câmera</div>
 
                     <label class="rangeHead">
                       <span>Bitrate H.264</span>
@@ -628,7 +628,11 @@ class MjpegServer(
                     jq.value=Number(s.jpegQuality||65);
                     document.getElementById('jpegQualityText').textContent=Math.round(jq.value)+'%';
                     const fl=document.getElementById('fpsLimit');
-                    fl.value=Number(s.targetFps||0);
+                    const maxFps=Math.max(30,Math.min(120,Number(s.maxFps||30)));
+                    fl.max=maxFps;
+                    fl.value=Math.min(maxFps,Number(s.targetFps||0));
+                    document.getElementById('fpsLimits').textContent=
+                      '0 = sem limite · máximo disponível nesta câmera/resolução: '+maxFps+' FPS';
                     document.getElementById('fpsLimitText').textContent=
                       Number(s.targetFps||0)<=0?'Sem limite':Math.round(Number(s.targetFps))+' FPS';
                     const br=document.getElementById('bitrateKbps');

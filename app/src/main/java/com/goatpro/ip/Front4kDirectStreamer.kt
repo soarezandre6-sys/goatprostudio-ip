@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.Camera
 import android.media.CamcorderProfile
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -28,8 +29,8 @@ class Front4kDirectStreamer(
         val cameraId: String,
         val width: Int = 3840,
         val height: Int = 2160,
-        val fps: Int = 30,
-        val bitrate: Int = 32_000_000,
+        val fps: Int = 60,
+        val bitrate: Int = 48_000_000,
         val fromOfficialProfile: Boolean = false,
         val legacyCameraId: Int = -1
     )
@@ -60,8 +61,8 @@ class Front4kDirectStreamer(
 
     private var configuredWidth = 3840
     private var configuredHeight = 2160
-    private var configuredFps = 30
-    private var configuredBitrate = 32_000_000
+    private var configuredFps = 60
+    private var configuredBitrate = 48_000_000
 
     @Volatile
     private var firstFrameDelivered = false
@@ -74,15 +75,19 @@ class Front4kDirectStreamer(
         synchronized(lock) {
             if (running.get() || starting.get()) return true
 
-            val effective = profileFor(context, profile.cameraId)
-            if (effective == null || effective.legacyCameraId < 0) {
-                listener.onError(
-                    "Camera1 frontal não publicou perfil oficial 3840x2160."
-                )
+            val detected = profileFor(context, profile.cameraId)
+            val effective = detected ?: profile
+            val legacyId = if (effective.legacyCameraId >= 0) {
+                effective.legacyCameraId
+            } else {
+                resolveLegacyFrontCameraId(profile.cameraId)
+            }
+            if (legacyId < 0) {
+                listener.onError("Nenhuma câmera frontal Camera1 disponível.")
                 return false
             }
 
-            val safeFps = effective.fps.coerceIn(5, 30)
+            val safeFps = minOf(profile.fps, effective.fps).coerceIn(5, 60)
             val safeBitrate = effective.bitrate.coerceIn(8_000_000, 60_000_000)
 
             return try {
@@ -93,12 +98,23 @@ class Front4kDirectStreamer(
                 configuredFps = safeFps
                 configuredBitrate = safeBitrate
 
-                val opened = Camera.open(effective.legacyCameraId)
+                val opened = Camera.open(legacyId)
                 camera = opened
 
                 runCatching {
                     val params = opened.parameters
                     params.setRecordingHint(true)
+                    val fps1000 = safeFps * 1000
+                    val fpsRange = params.supportedPreviewFpsRange
+                        ?.firstOrNull { range ->
+                            range.size >= 2 && range[0] <= fps1000 && range[1] >= fps1000
+                        }
+                    if (fpsRange != null) {
+                        params.setPreviewFpsRange(fpsRange[0], fpsRange[1])
+                    }
+                    if (params.supportedPreviewFrameRates?.contains(safeFps) == true) {
+                        params.previewFrameRate = safeFps
+                    }
                     if (
                         params.supportedFocusModes?.contains(
                             Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
@@ -164,6 +180,14 @@ class Front4kDirectStreamer(
                 true
             } catch (ex: Exception) {
                 stopLocked()
+                if (safeFps > 30) {
+                    return start(
+                        profile.copy(
+                            fps = 30,
+                            bitrate = minOf(profile.bitrate, 36_000_000)
+                        )
+                    )
+                }
                 listener.onError(
                     "Falha Camera1/MediaRecorder 4K frontal: " +
                         (ex.message ?: ex.javaClass.simpleName)
@@ -391,6 +415,26 @@ class Front4kDirectStreamer(
     }
 
     companion object {
+        private fun resolveLegacyFrontCameraId(preferredCameraId: String): Int {
+            val preferred = preferredCameraId.toIntOrNull()
+            val info = Camera.CameraInfo()
+            if (preferred != null && preferred in 0 until Camera.getNumberOfCameras()) {
+                val isFront = runCatching {
+                    Camera.getCameraInfo(preferred, info)
+                    info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
+                }.getOrDefault(false)
+                if (isFront) return preferred
+            }
+            for (id in 0 until Camera.getNumberOfCameras()) {
+                val isFront = runCatching {
+                    Camera.getCameraInfo(id, info)
+                    info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
+                }.getOrDefault(false)
+                if (isFront) return id
+            }
+            return -1
+        }
+
         fun profileFor(context: Context, cameraId: String): Profile? {
             val preferred = cameraId.toIntOrNull()
             val candidates = mutableListOf<Int>()
@@ -398,10 +442,11 @@ class Front4kDirectStreamer(
 
             val info = Camera.CameraInfo()
             for (id in 0 until Camera.getNumberOfCameras()) {
-                runCatching { Camera.getCameraInfo(id, info) }
-                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT && id !in candidates) {
-                    candidates.add(id)
-                }
+                val isFront = runCatching {
+                    Camera.getCameraInfo(id, info)
+                    info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
+                }.getOrDefault(false)
+                if (isFront && id !in candidates) candidates.add(id)
             }
 
             for (legacyId in candidates) {
@@ -412,33 +457,81 @@ class Front4kDirectStreamer(
                 }.getOrDefault(false)
                 if (!validFront) continue
 
-                if (!CamcorderProfile.hasProfile(legacyId, CamcorderProfile.QUALITY_2160P)) {
-                    continue
+                if (CamcorderProfile.hasProfile(legacyId, CamcorderProfile.QUALITY_2160P)) {
+                    val profile = runCatching {
+                        CamcorderProfile.get(legacyId, CamcorderProfile.QUALITY_2160P)
+                    }.getOrNull()
+                    if (
+                        profile != null &&
+                        profile.videoFrameWidth == 3840 &&
+                        profile.videoFrameHeight == 2160
+                    ) {
+                        return Profile(
+                            cameraId = cameraId,
+                            width = 3840,
+                            height = 2160,
+                            fps = profile.videoFrameRate.coerceIn(5, 60),
+                            bitrate = profile.videoBitRate.coerceIn(
+                                8_000_000,
+                                60_000_000
+                            ),
+                            fromOfficialProfile = true,
+                            legacyCameraId = legacyId
+                        )
+                    }
                 }
-                val profile = runCatching {
-                    CamcorderProfile.get(legacyId, CamcorderProfile.QUALITY_2160P)
-                }.getOrNull() ?: continue
 
-                if (
-                    profile.videoFrameWidth == 3840 &&
-                    profile.videoFrameHeight == 2160
-                ) {
-                    return Profile(
-                        cameraId = cameraId,
-                        width = 3840,
-                        height = 2160,
-                        fps = profile.videoFrameRate.coerceIn(5, 30),
-                        bitrate = profile.videoBitRate.coerceIn(
-                            8_000_000,
-                            60_000_000
-                        ),
-                        fromOfficialProfile = true,
-                        legacyCameraId = legacyId
-                    )
-                }
+                val probed = runCatching {
+                    val camera = Camera.open(legacyId)
+                    try {
+                        val params = camera.parameters
+                        val has4k = params.supportedVideoSizes.orEmpty().any {
+                            (it.width == 3840 && it.height == 2160) ||
+                                (it.width == 2160 && it.height == 3840)
+                        }
+                        if (!has4k) return@runCatching null
+                        val fpsByRange = params.supportedPreviewFpsRange.orEmpty()
+                            .mapNotNull { range ->
+                                if (range.size >= 2) range[1] / 1000 else null
+                            }
+                            .maxOrNull() ?: 30
+                        val fpsByList = params.supportedPreviewFrameRates.orEmpty()
+                            .maxOrNull() ?: 30
+                        Profile(
+                            cameraId = cameraId,
+                            width = 3840,
+                            height = 2160,
+                            fps = maxOf(fpsByRange, fpsByList)
+                                .coerceIn(30, 60),
+                            bitrate = 48_000_000,
+                            fromOfficialProfile = false,
+                            legacyCameraId = legacyId
+                        )
+                    } finally {
+                        camera.release()
+                    }
+                }.getOrNull()
+                if (probed != null) return probed
             }
 
-            return null
+            val samsungS21 =
+                Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
+                    Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
+                        .matches(Build.MODEL.orEmpty())
+            val legacyId = resolveLegacyFrontCameraId(cameraId)
+            return if (samsungS21 && legacyId >= 0) {
+                Profile(
+                    cameraId = cameraId,
+                    width = 3840,
+                    height = 2160,
+                    fps = 60,
+                    bitrate = 48_000_000,
+                    fromOfficialProfile = false,
+                    legacyCameraId = legacyId
+                )
+            } else {
+                null
+            }
         }
     }
 }

@@ -77,7 +77,7 @@ class BackgroundH264Streamer(
 
             val safeWidth = targetWidth.coerceAtMost(1920).coerceAtLeast(640) and -2
             val safeHeight = targetHeight.coerceAtMost(1080).coerceAtLeast(360) and -2
-            val safeFps = targetFps.coerceIn(10, 30)
+            val safeFps = targetFps.coerceIn(10, 60)
             val safeBitrate = targetBitrate.coerceIn(2_000_000, 16_000_000)
 
             return try {

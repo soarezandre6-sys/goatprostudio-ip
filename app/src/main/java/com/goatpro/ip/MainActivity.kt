@@ -182,6 +182,9 @@ class MainActivity : AppCompatActivity() {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
                     when {
+                        highSpeedH264Streamer.isRunning() ||
+                            highSpeedH264Streamer.isStarting() ->
+                            highSpeedH264Streamer.requestKeyFrame()
                         backgroundH264Streamer.isRunning() ||
                             backgroundH264Streamer.isStarting() ->
                             backgroundH264Streamer.requestKeyFrame()
@@ -192,7 +195,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else if (
                     !front4kDirectStreamer.isRunning() &&
-                    !backgroundH264Streamer.isRunning()
+                    !backgroundH264Streamer.isRunning() &&
+                    !highSpeedH264Streamer.isRunning()
                 ) {
                     h264Encoder.stop()
                 }
@@ -217,6 +221,67 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         })
+    }
+
+    private val highSpeedH264Streamer:
+        HighSpeedH264Streamer by lazy {
+        HighSpeedH264Streamer(
+            this,
+            object : HighSpeedH264Streamer.Listener {
+                override fun onAccessUnit(
+                    data: ByteArray,
+                    presentationTimeUs: Long,
+                    keyFrame: Boolean,
+                    codecConfig: Boolean
+                ) {
+                    rtspServer.onAccessUnit(
+                        data,
+                        presentationTimeUs,
+                        keyFrame,
+                        codecConfig
+                    )
+                }
+
+                override fun onStarted(
+                    width: Int,
+                    height: Int,
+                    fps: Int,
+                    bitrate: Int
+                ) {
+                    runOnUiThread {
+                        actualStreamWidth = width
+                        actualStreamHeight = height
+                        statusText.text = "TRANSMITINDO HIGH-SPEED • $fps FPS"
+                        performanceText.text =
+                            "H.264 high-speed • ${width}×${height} • $fps FPS • " +
+                                String.format(
+                                    java.util.Locale.US,
+                                    "%.1f Mbps",
+                                    bitrate / 1_000_000.0
+                                )
+                        updateStreamInfo()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        highSpeedH264Streamer.stop()
+                        if (streamTargetFps > 60) {
+                            streamTargetFps = maxRegularFpsForSelectedCamera()
+                                .coerceAtMost(60)
+                                .coerceAtLeast(30)
+                            selectedQualityProfile = QualityProfile.CUSTOM
+                        }
+                        setError("High-speed recusado • $message • voltando para $streamTargetFps FPS")
+                        startCamera()
+                        updateStreamInfo()
+                        saveSmartLinkState()
+                    }
+                }
+
+                override fun onStopped() = Unit
+            }
+        )
     }
 
     private val backgroundH264Streamer:
@@ -490,7 +555,9 @@ class MainActivity : AppCompatActivity() {
                 front4kDirectStreamer.isRunning() ||
                 front4kDirectStreamer.isStarting() ||
                 backgroundH264Streamer.isRunning() ||
-                backgroundH264Streamer.isStarting()
+                backgroundH264Streamer.isStarting() ||
+                highSpeedH264Streamer.isRunning() ||
+                highSpeedH264Streamer.isStarting()
             ) {
                 stopStreaming()
             } else {
@@ -539,7 +606,7 @@ class MainActivity : AppCompatActivity() {
         streamTargetFps = prefs.getInt(
             "target_fps",
             selectedQualityProfile.targetFps
-        ).let { if (it <= 0) 0 else it.coerceIn(5, 60) }
+        ).let { if (it <= 0) 0 else it.coerceIn(5, 120) }
         streamBitrateBps = prefs.getInt("bitrate_bps", 0)
             .coerceIn(0, 60_000_000)
         watermarkEnabled = prefs.getBoolean("watermark_enabled", true)
@@ -635,7 +702,7 @@ class MainActivity : AppCompatActivity() {
         streamTargetFps = prefs.getInt(
             prefix + "target_fps",
             selectedQualityProfile.targetFps
-        ).let { if (it <= 0) 0 else it.coerceIn(5, 60) }
+        ).let { if (it <= 0) 0 else it.coerceIn(5, 120) }
         streamBitrateBps = prefs.getInt(
             prefix + "bitrate_bps",
             0
@@ -1278,7 +1345,7 @@ class MainActivity : AppCompatActivity() {
                 if (profile != null) {
                     combined["3840x2160"] = ResolutionOption(
                         key = "3840x2160",
-                        label = "4K UHD · 3840×2160 · frontal",
+                        label = "4K UHD · 3840×2160 · frontal · até ${profile.fps} FPS",
                         size = Size(3840, 2160),
                         highResolution = true,
                         directFront4k = true,
@@ -1483,6 +1550,59 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun maxRegularFpsForSelectedCamera(): Int {
+        if (selectedResolution.directFront4k) {
+            return (selectedResolution.directFps ?: 60).coerceIn(30, 60)
+        }
+        val option = selectedCameraOption ?: return 30
+        val cameraId = option.physicalCameraId ?: option.logicalCameraId
+        return try {
+            val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val ranges = manager.getCameraCharacteristics(cameraId)
+                .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                .orEmpty()
+            (ranges.maxOfOrNull { it.upper } ?: 30).coerceIn(30, 60)
+        } catch (_: Exception) {
+            30
+        }
+    }
+
+    private fun maxSelectableFps(): Int {
+        if (selectedResolution.directFront4k) {
+            return (selectedResolution.directFps ?: 60).coerceIn(30, 60)
+        }
+        val option = selectedCameraOption ?: return 30
+        val regular = maxRegularFpsForSelectedCamera()
+        val highSpeed = HighSpeedH264Streamer.maxSupportedFps(
+            this,
+            option.logicalCameraId,
+            selectedResolution.size
+        )
+        return maxOf(regular, highSpeed).coerceIn(30, 120)
+    }
+
+    private fun preferredRegularFpsRange(): android.util.Range<Int>? {
+        val camera = currentCamera ?: return null
+        if (manualExposureEnabled || selectedResolution.directFront4k) return null
+        val requested =
+            (if (streamTargetFps > 0) streamTargetFps else 30)
+                .coerceAtMost(60)
+        return try {
+            val ranges = Camera2CameraInfo.from(camera.cameraInfo)
+                .getCameraCharacteristic(
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+                ).orEmpty()
+            ranges
+                .filter { it.lower <= requested && it.upper >= requested }
+                .minWithOrNull(
+                    compareBy<android.util.Range<Int>> { it.upper - it.lower }
+                        .thenBy { kotlin.math.abs(it.upper - requested) }
+                )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun setupQualitySelector() {
         qualitySpinner.adapter =
             styledSpinnerAdapter(QualityProfile.entries.map { it.label })
@@ -1627,6 +1747,7 @@ class MainActivity : AppCompatActivity() {
 
         // The dedicated front 4K recorder is already UI-independent.
         if (selectedResolution.directFront4k) return
+        if (highSpeedH264Streamer.isRunning() || highSpeedH264Streamer.isStarting()) return
         if (backgroundHeadless) return
 
         backgroundHeadless = true
@@ -1649,7 +1770,7 @@ class MainActivity : AppCompatActivity() {
             ?: option.zoomRatio
             ?: 1f
         val targetFps =
-            (if (streamTargetFps > 0) streamTargetFps else 20).coerceIn(10, 30)
+            (if (streamTargetFps > 0) streamTargetFps else 20).coerceIn(10, 60)
         val targetBitrate = if (streamBitrateBps > 0) {
             streamBitrateBps
         } else {
@@ -1726,7 +1847,9 @@ class MainActivity : AppCompatActivity() {
     private fun startCamera() {
         if (
             backgroundH264Streamer.isRunning() ||
-            backgroundH264Streamer.isStarting()
+            backgroundH264Streamer.isStarting() ||
+            highSpeedH264Streamer.isRunning() ||
+            highSpeedH264Streamer.isStarting()
         ) return
 
         val providerFuture = ProcessCameraProvider.getInstance(this)
@@ -1953,7 +2076,7 @@ class MainActivity : AppCompatActivity() {
                                 if (rtspServer.activeClientCount() > 0) {
                                     val h264Fps =
                                         (if (streamTargetFps > 0) streamTargetFps else 30)
-                                            .coerceIn(5, 60)
+                                            .coerceIn(5, 120)
                                     val bitrate =
                                         if (streamBitrateBps > 0) {
                                             streamBitrateBps
@@ -2178,13 +2301,30 @@ class MainActivity : AppCompatActivity() {
 
             "fpsLimit" -> {
                 val requested = value?.toIntOrNull() ?: return
-                streamTargetFps = if (requested <= 0) 0 else requested.coerceIn(5, 60)
+                val maxFps = maxSelectableFps()
+                streamTargetFps =
+                    if (requested <= 0) 0
+                    else requested.coerceIn(5, maxFps)
                 selectedQualityProfile = QualityProfile.CUSTOM
-                qualitySpinner.setSelection(QualityProfile.entries.indexOf(QualityProfile.CUSTOM))
+                qualitySpinner.setSelection(
+                    QualityProfile.entries.indexOf(QualityProfile.CUSTOM)
+                )
                 nextEncodeDueNs = 0L
                 resetPerformanceStats()
                 updateStreamInfo()
-                if (manualExposureEnabled) applyManualExposure()
+                if (manualExposureEnabled) {
+                    applyManualExposure()
+                } else {
+                    applyAutomaticSensorControls()
+                }
+
+                if (isStreamingActive()) {
+                    stopStreaming()
+                    previewView.postDelayed({
+                        startCamera()
+                        startStreaming()
+                    }, 250L)
+                }
             }
 
             "rotation" -> {
@@ -2533,6 +2673,13 @@ class MainActivity : AppCompatActivity() {
                     selectedAntibandingMode
                 )
 
+            preferredRegularFpsRange()?.let { fpsRange ->
+                builder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    fpsRange
+                )
+            }
+
             if (selectedSceneMode == CaptureRequest.CONTROL_SCENE_MODE_DISABLED) {
                 builder.setCaptureRequestOption(
                     CaptureRequest.CONTROL_MODE,
@@ -2863,6 +3010,7 @@ class MainActivity : AppCompatActivity() {
                 ",\"qualityLabel\":\"${selectedQualityProfile.shortLabel}\"" +
                 ",\"jpegQuality\":$streamJpegQuality" +
                 ",\"targetFps\":$streamTargetFps" +
+                ",\"maxFps\":${maxSelectableFps()}" +
                 ",\"bitrateKbps\":${streamBitrateBps / 1000}" +
                 ",\"watermarkEnabled\":$watermarkEnabled" +
                 ",\"smartLinkEnabled\":true" +
@@ -2874,7 +3022,7 @@ class MainActivity : AppCompatActivity() {
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
                 ",\"rtspClients\":${rtspServer.activeClientCount()}" +
-                ",\"h264Running\":${h264Encoder.isRunning() || front4kDirectStreamer.isRunning()}" +
+                ",\"h264Running\":${h264Encoder.isRunning() || front4kDirectStreamer.isRunning() || highSpeedH264Streamer.isRunning()}" +
                 ",\"camera\":\"$cameraName\"" +
                 ",\"cameraKey\":\"$cameraKey\"" +
                 ",\"cameraOptionsCsv\":\"$cameraOptionsCsv\"" +
@@ -2972,7 +3120,9 @@ class MainActivity : AppCompatActivity() {
             front4kDirectStreamer.isRunning() ||
             front4kDirectStreamer.isStarting() ||
             backgroundH264Streamer.isRunning() ||
-            backgroundH264Streamer.isStarting()
+            backgroundH264Streamer.isStarting() ||
+            highSpeedH264Streamer.isRunning() ||
+            highSpeedH264Streamer.isStarting()
 
     private fun startStreamingForegroundService() {
         if (!backgroundStreamingEnabled) return
@@ -2998,6 +3148,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         startStreamingForegroundService()
+        highSpeedH264Streamer.stop()
         front4kDirectStreamer.stop()
         refreshAddress()
         nextEncodeDueNs = 0L
@@ -3015,6 +3166,18 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+
+        val selectedCamera = selectedCameraOption
+        val highSpeedRequested =
+            !selectedResolution.directFront4k &&
+            streamTargetFps > 60 &&
+            selectedCamera != null &&
+            HighSpeedH264Streamer.supports(
+                this,
+                selectedCamera.logicalCameraId,
+                selectedResolution.size,
+                streamTargetFps
+            )
 
         if (selectedResolution.directFront4k) {
             h264Encoder.stop()
@@ -3045,7 +3208,7 @@ class MainActivity : AppCompatActivity() {
                         cameraId = cameraId,
                         width = selectedResolution.size.width,
                         height = selectedResolution.size.height,
-                        fps = selectedResolution.directFps ?: 30,
+                        fps = selectedResolution.directFps ?: 60,
                         bitrate =
                             if (streamBitrateBps > 0) {
                                 streamBitrateBps
@@ -3084,8 +3247,65 @@ class MainActivity : AppCompatActivity() {
                     startCamera()
                 }
             }, ContextCompat.getMainExecutor(this))
+        } else if (highSpeedRequested) {
+            front4kDirectStreamer.stop()
+            h264Encoder.stop()
+            backgroundH264Streamer.stop()
+            rtspServer.start()
+            statusText.text = "INICIANDO HIGH-SPEED ${streamTargetFps} FPS…"
+            statusText.setTextColor(
+                ContextCompat.getColor(this, R.color.green)
+            )
+
+            val providerFuture = ProcessCameraProvider.getInstance(this)
+            providerFuture.addListener({
+                try {
+                    val provider = providerFuture.get()
+                    provider.unbindAll()
+                    previewUseCase = null
+                    analysisUseCase = null
+                    val zoom = currentCamera?.cameraInfo?.zoomState?.value?.zoomRatio
+                        ?: selectedCamera?.zoomRatio
+                        ?: 1f
+                    currentCamera = null
+                    val bitrate = if (streamBitrateBps > 0) {
+                        streamBitrateBps
+                    } else {
+                        H264Encoder.recommendedBitrate(
+                            selectedResolution.size.width,
+                            selectedResolution.size.height,
+                            streamTargetFps,
+                            streamJpegQuality
+                        )
+                    }
+                    val started = highSpeedH264Streamer.start(
+                        targetCameraId = selectedCamera!!.logicalCameraId,
+                        targetWidth = selectedResolution.size.width,
+                        targetHeight = selectedResolution.size.height,
+                        targetFps = streamTargetFps,
+                        targetBitrate = bitrate,
+                        targetZoomRatio = zoom
+                    )
+                    if (!started) {
+                        streamTargetFps = maxRegularFpsForSelectedCamera()
+                            .coerceAtMost(60)
+                            .coerceAtLeast(30)
+                        startCamera()
+                    }
+                } catch (ex: Exception) {
+                    streamTargetFps = maxRegularFpsForSelectedCamera()
+                        .coerceAtMost(60)
+                        .coerceAtLeast(30)
+                    setError(
+                        "High-speed: " +
+                            (ex.message ?: "falha ao abrir a câmera")
+                    )
+                    startCamera()
+                }
+            }, ContextCompat.getMainExecutor(this))
         } else {
             front4kDirectStreamer.stop()
+            highSpeedH264Streamer.stop()
             rtspServer.start()
             statusText.text = "TRANSMITINDO PARA O GOAT PRO STUDIO"
             statusText.setTextColor(
@@ -3106,6 +3326,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        highSpeedH264Streamer.stop()
         backgroundH264Streamer.stop()
         backgroundDirectActive = false
         front4kDirectStreamer.stop()
@@ -3301,6 +3522,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        highSpeedH264Streamer.stop()
         backgroundH264Streamer.stop()
         backgroundDirectActive = false
         front4kDirectStreamer.stop()

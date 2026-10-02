@@ -72,13 +72,16 @@ class H264DirectStreamer(
                     .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
                 val video = caps.videoCapabilities
                 video.isSizeSupported(width, height) &&
-                    runCatching {
-                        video.areSizeAndRateSupported(
-                            width,
-                            height,
-                            fps.toDouble()
+                    (
+                        runCatching {
+                            video.areSizeAndRateSupported(
+                                width,
+                                height,
+                                fps.toDouble()
+                            )
+                        }.getOrDefault(true) ||
+                            video.isSizeSupported(width, height)
                         )
-                    }.getOrDefault(true)
             } finally {
                 encoder.release()
             }

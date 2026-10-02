@@ -616,3 +616,19 @@ Branch: `build-16-goat-cam`
 - APK SHA-256: `95da8b77c1550b86b88fe656d037639e5e571dac737930b10e3b0db01e49bc2a`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: validar sessão 8K pelo perfil lógico 8KUHD/VIDEO_RECORD e fallback automático para a resolução anterior se o 8K for recusado.
+
+
+## Build 17 — 8K PRIVATE / USECASE_RECORD
+Branch: `build-17-goat-cam`
+
+- criada a partir da Build 16;
+- 4K e tele permanecem no caminho já validado;
+- o 8K procura primeiro o `RecommendedStreamConfigurationMap.USECASE_RECORD` da câmera lógica traseira;
+- a busca valida `ImageFormat.PRIVATE` e também saídas de `MediaCodec` no mapa recomendado de gravação;
+- prioridade para 8K exato `7680×4320`;
+- quando disponível, usa `CamcorderProfile.QUALITY_8KUHD` / `EncoderProfiles` para obter FPS e bitrate reais do perfil 8K do aparelho;
+- preferência por perfil HEVC quando a Samsung o anunciar;
+- o MediaCodec HEVC passa a aceitar FPS do perfil oficial até 30 FPS, em vez de limitar o teste a 10–15 FPS;
+- mantém `TEMPLATE_RECORD`, `CONTROL_CAPTURE_INTENT_VIDEO_RECORD` e stream use case VIDEO_RECORD;
+- fallback automático para a resolução anterior continua ativo se a sessão 8K for recusada;
+- nenhuma APK da Build 17 foi gerada nesta etapa.

@@ -711,3 +711,22 @@ Branch: `build-19-goat-cam`
 - tamanho do APK: 4.883.048 bytes;
 - APK SHA-256: `9097fda6d454f45df8a5d0a162e964fbfd4bcf696295ef4d8d54c8e9a031e70a`;
 - compilação `:app:assembleDebug`: sucesso.
+
+
+## Build 20 — diagnóstico Samsung/vendor para 8K
+Branch: `build-20-goat-cam`
+
+- criada a partir da Build 19;
+- 4K e tele permanecem sem alteração;
+- novo módulo `SamsungVendorDiagnostics`;
+- novo botão `Diagnóstico 8K Samsung` na tela principal;
+- varre câmeras lógicas e físicas expostas pelo Camera2;
+- lê nomes das `CameraCharacteristics`, `CaptureRequest`, `CaptureResult`, `SessionKeys` e `PhysicalCameraRequestKeys` visíveis a apps de terceiros;
+- destaca nomes ligados a Samsung/vendor/8K/UHD/4320/video/record/remosaic/high-resolution/sensor/binning/HEVC/HDR;
+- inclui hardware level, capabilities, pixel array, active array, distância focal e IDs físicos;
+- tenta ler valores das características candidatas quando o Android permite;
+- o relatório completo é copiado automaticamente para a área de transferência;
+- também salva uma cópia interna em `goat-camera-vendor-report.txt`;
+- o resumo aparece na própria interface;
+- não usa root, APK auxiliar nem API escondida: diagnostica somente o que o firmware expõe publicamente ao GOAT Cam;
+- nenhuma APK da Build 20 foi gerada nesta etapa.

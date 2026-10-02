@@ -424,7 +424,14 @@ class MainActivity : AppCompatActivity() {
         val label: String,
         val size: Size,
         val highResolution: Boolean,
-        val directHevc: Boolean
+        val directHevc: Boolean,
+        val overrideLogicalCameraId: String? = null,
+        val overridePhysicalCameraId: String? = null
+    )
+
+    private data class DirectCameraSource(
+        val logicalCameraId: String,
+        val physicalCameraId: String?
     )
 
     private fun resolutionKey(size: Size): String =
@@ -502,18 +509,24 @@ class MainActivity : AppCompatActivity() {
         fallbackIndex: Int,
         count: Int
     ): String {
-        if (!metric.isFinite() || !mainMetric.isFinite() || mainMetric <= 0f) {
-            return when {
-                count >= 3 && fallbackIndex == 0 -> "Ultra-wide"
-                count >= 3 && fallbackIndex == count - 1 -> "Tele"
+        // On devices such as the Galaxy S21 the tele module can have a focal
+        // metric close to the main camera. If three real rear sensors are
+        // exposed, preserve them by ordered field of view instead of requiring
+        // a large focal-ratio gap.
+        if (count >= 3) {
+            return when (fallbackIndex) {
+                0 -> "Ultra-wide"
+                count - 1 -> "Tele"
                 else -> "Traseira principal"
             }
         }
 
+        if (!metric.isFinite() || !mainMetric.isFinite() || mainMetric <= 0f) {
+            return "Traseira principal"
+        }
+
         val ratio = metric / mainMetric
         return when {
-            count >= 3 && fallbackIndex == 0 && ratio < 0.95f -> "Ultra-wide"
-            count >= 3 && fallbackIndex == count - 1 && ratio > 1.05f -> "Tele"
             ratio < 0.82f -> "Ultra-wide"
             ratio > 1.22f -> "Tele"
             else -> "Traseira principal"
@@ -607,24 +620,21 @@ class MainActivity : AppCompatActivity() {
 
         val rear = mutableListOf<RawCamera>()
         sortedRearCandidates.forEach { row ->
+            // A physical child can also appear as its own standalone logical
+            // camera. Those two entries are the same sensor. Cameras with
+            // merely similar focal lengths are NOT duplicates (important for
+            // the S21 main + tele pair).
+            val sensorId = row.physicalId ?: row.logicalId
             val duplicateIndex = rear.indexOfFirst { existing ->
-                if (existing.metric.isFinite() && row.metric.isFinite()) {
-                    val scale = maxOf(
-                        kotlin.math.abs(existing.metric),
-                        kotlin.math.abs(row.metric),
-                        0.001f
-                    )
-                    kotlin.math.abs(existing.metric - row.metric) <= scale * 0.08f
-                } else {
-                    existing.logicalId == row.logicalId &&
-                        existing.physicalId == row.physicalId
-                }
+                (existing.physicalId ?: existing.logicalId) == sensorId
             }
 
             if (duplicateIndex < 0) {
                 rear.add(row)
             } else {
                 val existing = rear[duplicateIndex]
+                // Prefer the standalone logical ID when Samsung exposes both:
+                // it often advertises richer stream combinations.
                 if (existing.physicalId != null && row.physicalId == null) {
                     rear[duplicateIndex] = row
                 }
@@ -796,17 +806,142 @@ class MainActivity : AppCompatActivity() {
         selectCameraLens(next)
     }
 
+    private fun find8kCameraSource(
+        manager: CameraManager
+    ): DirectCameraSource? {
+        val target = Size(7680, 4320)
+        var sensorFallback: DirectCameraSource? = null
+
+        for (logicalId in manager.cameraIdList) {
+            val logicalChars = runCatching {
+                manager.getCameraCharacteristics(logicalId)
+            }.getOrNull() ?: continue
+
+            if (
+                logicalChars.get(CameraCharacteristics.LENS_FACING) !=
+                    CameraCharacteristics.LENS_FACING_BACK
+            ) {
+                continue
+            }
+
+            val physicalIds =
+                if (Build.VERSION.SDK_INT >= 28) {
+                    logicalChars.physicalCameraIds.toList()
+                } else {
+                    emptyList()
+                }
+
+            val candidates = listOf<String?>(null) + physicalIds
+            for (physicalId in candidates) {
+                val chars = runCatching {
+                    manager.getCameraCharacteristics(
+                        physicalId ?: logicalId
+                    )
+                }.getOrNull() ?: continue
+
+                val map = chars.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                )
+
+                val advertised = mutableListOf<Size>()
+                fun addSizes(sizes: Array<Size>?) {
+                    sizes.orEmpty().forEach { advertised.add(it) }
+                }
+
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.media.MediaCodec::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.media.MediaRecorder::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.graphics.SurfaceTexture::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getHighResolutionOutputSizes(
+                            ImageFormat.YUV_420_888
+                        )
+                    )
+                }
+
+                if (
+                    advertised.any {
+                        canonicalLandscapeSize(it) == target
+                    }
+                ) {
+                    return DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = physicalId
+                    )
+                }
+
+                if (sensorFallback == null) {
+                    val pixel = chars.get(
+                        CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
+                    )
+                    val active = chars.get(
+                        CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+                    )
+                    val sensorWidth = maxOf(
+                        pixel?.width ?: 0,
+                        active?.width() ?: 0
+                    )
+                    val sensorHeight = maxOf(
+                        pixel?.height ?: 0,
+                        active?.height() ?: 0
+                    )
+                    val landscapeWidth =
+                        maxOf(sensorWidth, sensorHeight)
+                    val landscapeHeight =
+                        minOf(sensorWidth, sensorHeight)
+
+                    if (
+                        landscapeWidth >= target.width &&
+                        landscapeHeight >= target.height
+                    ) {
+                        sensorFallback = DirectCameraSource(
+                            logicalCameraId = logicalId,
+                            physicalCameraId = physicalId
+                        )
+                    }
+                }
+            }
+        }
+
+        return sensorFallback
+    }
+
     private fun supportedResolutionOptions(): List<ResolutionOption> {
         return try {
             val manager =
                 getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val option = selectedCameraOption
-            val characteristicId =
-                option?.physicalCameraId ?: option?.logicalCameraId
+            val cameraIds = listOfNotNull(
+                option?.physicalCameraId,
+                option?.logicalCameraId
+            ).distinct()
 
+            val standardKeys = setOf(
+                "1280x720",
+                "1920x1080",
+                "2560x1440",
+                "3840x2160"
+            )
             val regular = linkedMapOf<String, Size>()
             val high = linkedMapOf<String, Size>()
-            val directHevc = linkedMapOf<String, Size>()
 
             fun collectYuv(
                 target: MutableMap<String, Size>,
@@ -814,18 +949,20 @@ class MainActivity : AppCompatActivity() {
             ) {
                 sizes.orEmpty().forEach { raw ->
                     val size = canonicalLandscapeSize(raw)
-                    if (!isUsableVideoResolution(size)) return@forEach
-                    if (size.width > 3840 || size.height > 2160) {
-                        return@forEach
+                    val key = resolutionKey(size)
+                    if (
+                        isUsableVideoResolution(size) &&
+                        key in standardKeys
+                    ) {
+                        target[key] = size
                     }
-                    target[resolutionKey(size)] = size
                 }
             }
 
-            if (characteristicId != null) {
+            cameraIds.forEach { cameraId ->
                 runCatching {
                     val map = manager
-                        .getCameraCharacteristics(characteristicId)
+                        .getCameraCharacteristics(cameraId)
                         .get(
                             CameraCharacteristics
                                 .SCALER_STREAM_CONFIGURATION_MAP
@@ -841,23 +978,6 @@ class MainActivity : AppCompatActivity() {
                             ImageFormat.YUV_420_888
                         )
                     )
-
-                    map?.getOutputSizes(
-                        android.media.MediaCodec::class.java
-                    ).orEmpty().forEach { raw ->
-                        val size = canonicalLandscapeSize(raw)
-                        if (!isUsableVideoResolution(size)) return@forEach
-                        if (size.width <= 3840) return@forEach
-                        if (
-                            hevcDirectStreamer.supports(
-                                size.width,
-                                size.height,
-                                24
-                            )
-                        ) {
-                            directHevc[resolutionKey(size)] = size
-                        }
-                    }
                 }
             }
 
@@ -882,14 +1002,29 @@ class MainActivity : AppCompatActivity() {
                     directHevc = false
                 )
             }
-            directHevc.forEach { (key, size) ->
-                combined[key] = ResolutionOption(
-                    key = key,
-                    label = resolutionLabel(size),
-                    size = size,
-                    highResolution = true,
-                    directHevc = true
-                )
+
+            // 8K is intentionally separate from the working CameraX/YUV path.
+            // Do not substitute an intermediate sensor size such as 4032×...
+            // and do not hide the option merely because MediaCodec under-reports
+            // its capabilities. The direct HEVC path will attempt the exact size.
+            if (
+                option?.facing == CameraSelector.LENS_FACING_BACK
+            ) {
+                val source = find8kCameraSource(manager)
+                if (source != null) {
+                    combined["7680x4320"] = ResolutionOption(
+                        key = "7680x4320",
+                        label =
+                            "8K UHD · 7680×4320 · 10 FPS experimental",
+                        size = Size(7680, 4320),
+                        highResolution = true,
+                        directHevc = true,
+                        overrideLogicalCameraId =
+                            source.logicalCameraId,
+                        overridePhysicalCameraId =
+                            source.physicalCameraId
+                    )
+                }
             }
 
             val options = combined.values.sortedWith(
@@ -970,7 +1105,7 @@ class MainActivity : AppCompatActivity() {
         when {
             option.directHevc -> {
                 streamJpegQuality = 50
-                streamTargetFps = 24
+                streamTargetFps = 10
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width >= 3840 -> {
@@ -2389,17 +2524,30 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
 
+                    val logicalCameraId =
+                        selectedResolution.overrideLogicalCameraId
+                            ?: option.logicalCameraId
+                    val physicalCameraId =
+                        selectedResolution.overridePhysicalCameraId
+                            ?: if (
+                                logicalCameraId == option.logicalCameraId
+                            ) {
+                                option.physicalCameraId
+                            } else {
+                                null
+                            }
+
                     val size = selectedResolution.size
                     val fps =
                         if (streamTargetFps > 0) {
-                            streamTargetFps.coerceIn(5, 30)
+                            streamTargetFps.coerceIn(5, 10)
                         } else {
-                            24
+                            10
                         }
 
                     val started = hevcDirectStreamer.start(
-                        logicalCameraId = option.logicalCameraId,
-                        physicalCameraId = option.physicalCameraId,
+                        logicalCameraId = logicalCameraId,
+                        physicalCameraId = physicalCameraId,
                         width = size.width,
                         height = size.height,
                         fps = fps,

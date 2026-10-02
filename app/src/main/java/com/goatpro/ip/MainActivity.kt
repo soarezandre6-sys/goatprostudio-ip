@@ -77,10 +77,15 @@ class MainActivity : AppCompatActivity() {
     private var autoSurfaceRotation = Surface.ROTATION_0
 
     @Volatile
-    private var selectedPreset = ResolutionPreset.FHD
+    private var selectedResolution = ResolutionOption(
+        key = "1920x1080",
+        label = "Full HD · 1920×1080",
+        size = Size(1920, 1080),
+        highResolution = false
+    )
 
-    private var availableResolutionPresets: List<ResolutionPreset> =
-        listOf(ResolutionPreset.HD, ResolutionPreset.FHD)
+    private var availableResolutionOptions: List<ResolutionOption> =
+        listOf(selectedResolution)
 
     @Volatile
     private var selectedQualityProfile = QualityProfile.BALANCED
@@ -319,6 +324,45 @@ class MainActivity : AppCompatActivity() {
                 previewView.requestLayout()
             }
         }
+    }
+
+    private data class ResolutionOption(
+        val key: String,
+        val label: String,
+        val size: Size,
+        val highResolution: Boolean
+    )
+
+    private fun resolutionKey(size: Size): String =
+        size.width.toString() + "x" + size.height.toString()
+
+    private fun resolutionLabel(size: Size): String {
+        val prefix = when {
+            size.width == 3840 && size.height == 2160 -> "4K UHD · "
+            size.width == 2560 && size.height == 1440 -> "2K QHD · "
+            size.width == 1920 && size.height == 1080 -> "Full HD · "
+            size.width == 1280 && size.height == 720 -> "HD · "
+            size.width == 960 && size.height == 540 -> "qHD · "
+            else -> ""
+        }
+        return prefix + size.width + "×" + size.height
+    }
+
+    private fun canonicalLandscapeSize(size: Size): Size =
+        if (size.width >= size.height) {
+            Size(size.width, size.height)
+        } else {
+            Size(size.height, size.width)
+        }
+
+    private fun isUsableVideoResolution(size: Size): Boolean {
+        val landscape = canonicalLandscapeSize(size)
+        if (landscape.width < 640 || landscape.height < 360) return false
+        if (landscape.width > 3840 || landscape.height > 2160) return false
+
+        val aspect = landscape.width.toFloat() / landscape.height.toFloat()
+        val target = 16f / 9f
+        return kotlin.math.abs(aspect - target) <= 0.03f
     }
 
     private data class CameraLensOption(
@@ -657,7 +701,7 @@ class MainActivity : AppCompatActivity() {
         selectCameraLens(next)
     }
 
-    private fun supportedResolutionPresets(): List<ResolutionPreset> {
+    private fun supportedResolutionOptions(): List<ResolutionOption> {
         return try {
             val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val option = selectedCameraOption
@@ -666,71 +710,103 @@ class MainActivity : AppCompatActivity() {
                 option?.logicalCameraId
             ).distinct()
 
-            val sizes = mutableListOf<Size>()
+            val regular = linkedMapOf<String, Size>()
+            val high = linkedMapOf<String, Size>()
+
+            fun collect(target: MutableMap<String, Size>, sizes: Array<Size>?) {
+                sizes.orEmpty().forEach { raw ->
+                    val size = canonicalLandscapeSize(raw)
+                    if (!isUsableVideoResolution(size)) return@forEach
+                    target[resolutionKey(size)] = size
+                }
+            }
+
             cameraIds.forEach { cameraId ->
                 runCatching {
                     val map = manager.getCameraCharacteristics(cameraId)
                         .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
-                    map?.getOutputSizes(ImageFormat.YUV_420_888)
-                        ?.let { sizes.addAll(it) }
-
-                    map?.getHighResolutionOutputSizes(ImageFormat.YUV_420_888)
-                        ?.let { sizes.addAll(it) }
+                    collect(regular, map?.getOutputSizes(ImageFormat.YUV_420_888))
+                    collect(high, map?.getHighResolutionOutputSizes(ImageFormat.YUV_420_888))
                 }
             }
 
-            val uniqueSizes = sizes.distinctBy {
-                it.width.toString() + "x" + it.height.toString()
-            }
+            val combined = linkedMapOf<String, Size>()
+            regular.forEach { (key, size) -> combined[key] = size }
+            high.forEach { (key, size) -> combined[key] = size }
 
-            val supported = ResolutionPreset.entries.filter { preset ->
-                uniqueSizes.any { size ->
-                    (size.width == preset.size.width &&
-                        size.height == preset.size.height) ||
-                        (size.width == preset.size.height &&
-                            size.height == preset.size.width)
+            val options = combined.values
+                .sortedWith(
+                    compareBy<Size> { it.width.toLong() * it.height.toLong() }
+                        .thenBy { it.width }
+                )
+                .map { size ->
+                    val key = resolutionKey(size)
+                    ResolutionOption(
+                        key = key,
+                        label = resolutionLabel(size),
+                        size = size,
+                        highResolution =
+                            high.containsKey(key) ||
+                                size.width.toLong() * size.height.toLong() >
+                                1920L * 1080L
+                    )
                 }
-            }
 
-            if (supported.isEmpty()) {
-                listOf(ResolutionPreset.HD, ResolutionPreset.FHD)
+            if (options.isNotEmpty()) {
+                options
             } else {
-                supported
+                listOf(
+                    ResolutionOption("1280x720", "HD · 1280×720", Size(1280, 720), false),
+                    ResolutionOption("1920x1080", "Full HD · 1920×1080", Size(1920, 1080), false)
+                )
             }
         } catch (_: Exception) {
-            listOf(ResolutionPreset.HD, ResolutionPreset.FHD)
+            listOf(
+                ResolutionOption("1280x720", "HD · 1280×720", Size(1280, 720), false),
+                ResolutionOption("1920x1080", "Full HD · 1920×1080", Size(1920, 1080), false)
+            )
         }
     }
 
     private fun refreshResolutionOptions() {
-        availableResolutionPresets = supportedResolutionPresets()
+        availableResolutionOptions = supportedResolutionOptions()
 
-        if (!availableResolutionPresets.contains(selectedPreset)) {
-            selectedPreset = when {
-                availableResolutionPresets.contains(ResolutionPreset.FHD) -> ResolutionPreset.FHD
-                availableResolutionPresets.isNotEmpty() -> availableResolutionPresets.last()
-                else -> ResolutionPreset.HD
-            }
+        val stillAvailable = availableResolutionOptions.firstOrNull {
+            it.key == selectedResolution.key
         }
 
+        selectedResolution = stillAvailable
+            ?: availableResolutionOptions.firstOrNull { it.key == "1920x1080" }
+            ?: availableResolutionOptions
+                .filter {
+                    it.size.width.toLong() * it.size.height.toLong() <= 1920L * 1080L
+                }
+                .maxByOrNull {
+                    it.size.width.toLong() * it.size.height.toLong()
+                }
+            ?: availableResolutionOptions.first()
+
         resolutionSpinner.adapter =
-            styledSpinnerAdapter(availableResolutionPresets.map { it.label })
+            styledSpinnerAdapter(availableResolutionOptions.map { it.label })
         resolutionSpinner.setSelection(
-            availableResolutionPresets.indexOf(selectedPreset).coerceAtLeast(0)
+            availableResolutionOptions.indexOfFirst {
+                it.key == selectedResolution.key
+            }.coerceAtLeast(0)
         )
     }
 
-    private fun applyExperimentalResolutionDefaults(preset: ResolutionPreset) {
-        when (preset) {
-            ResolutionPreset.QHD -> {
-                streamJpegQuality = 58
-                streamTargetFps = 15
-                selectedQualityProfile = QualityProfile.CUSTOM
-            }
-            ResolutionPreset.UHD -> {
+    private fun applyHighResolutionDefaults(option: ResolutionOption) {
+        val width = option.size.width
+        when {
+            width >= 3840 -> {
                 streamJpegQuality = 50
                 streamTargetFps = 10
+                selectedQualityProfile = QualityProfile.CUSTOM
+            }
+            width > 1920 -> {
+                streamJpegQuality = 58
+                streamTargetFps = 15
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             else -> return
@@ -743,20 +819,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun selectResolutionPreset(newPreset: ResolutionPreset) {
-        if (!availableResolutionPresets.contains(newPreset)) {
+    private fun selectResolutionOption(newOption: ResolutionOption) {
+        val option = availableResolutionOptions.firstOrNull {
+            it.key == newOption.key
+        } ?: run {
             Toast.makeText(
                 this,
-                newPreset.label + " não é anunciada por esta câmera.",
+                newOption.label + " não está disponível nesta câmera.",
                 Toast.LENGTH_SHORT
             ).show()
             return
         }
 
-        if (newPreset == selectedPreset) return
+        if (option.key == selectedResolution.key) return
 
-        selectedPreset = newPreset
-        applyExperimentalResolutionDefaults(newPreset)
+        selectedResolution = option
+        applyHighResolutionDefaults(option)
         actualStreamWidth = 0
         actualStreamHeight = 0
         nextEncodeDueNs = 0L
@@ -773,22 +851,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun findResolutionOption(value: String?): ResolutionOption? {
+        val requested = value.orEmpty().trim()
+        if (requested.isEmpty()) return null
+
+        val aliasKey = when (requested.uppercase()) {
+            "HD", "720P" -> "1280x720"
+            "FHD", "1080P" -> "1920x1080"
+            "QHD", "2K", "1440P" -> "2560x1440"
+            "UHD", "4K", "2160P" -> "3840x2160"
+            else -> requested.replace("×", "x").lowercase()
+        }
+
+        return availableResolutionOptions.firstOrNull {
+            it.key.lowercase() == aliasKey
+        }
+    }
+
     private fun setupResolutionSelector() {
         refreshResolutionOptions()
 
-        resolutionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(
-                parent: AdapterView<*>?,
-                view: View?,
-                position: Int,
-                id: Long
-            ) {
-                val newPreset = availableResolutionPresets.getOrNull(position) ?: return
-                selectResolutionPreset(newPreset)
-            }
+        resolutionSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    val option = availableResolutionOptions.getOrNull(position) ?: return
+                    selectResolutionOption(option)
+                }
 
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
     }
 
     private fun setupQualitySelector() {
@@ -909,14 +1005,14 @@ class MainActivity : AppCompatActivity() {
             } else {
                 CameraSelector.Builder().requireLensFacing(lensFacing).build()
             }
-            val size = selectedPreset.size
+            val size = selectedResolution.size
             val targetRotation = if (selectedRotationMode == RotationMode.AUTO) {
                 autoSurfaceRotation
             } else {
                 Surface.ROTATION_0
             }
 
-            val analysisFallbackRule = if (selectedPreset.experimental) {
+            val analysisFallbackRule = if (selectedResolution.highResolution) {
                 ResolutionStrategy.FALLBACK_RULE_NONE
             } else {
                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
@@ -924,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
 
             val analysisResolutionSelector = ResolutionSelector.Builder()
                 .setAllowedResolutionMode(
-                    if (selectedPreset.experimental) {
+                    if (selectedResolution.highResolution) {
                         ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
                     } else {
                         ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION
@@ -940,7 +1036,7 @@ class MainActivity : AppCompatActivity() {
                 .build()
 
             val previewTargetSize =
-                if (selectedPreset.experimental) ResolutionPreset.HD.size else size
+                if (selectedResolution.highResolution) Size(1280, 720) else size
 
             val previewResolutionSelector = ResolutionSelector.Builder()
                 .setAllowedResolutionMode(
@@ -1204,20 +1300,15 @@ class MainActivity : AppCompatActivity() {
         val camera = currentCamera
         when (action) {
             "resolution" -> {
-                val preset = when (value?.uppercase()) {
-                    "HD", "720P" -> ResolutionPreset.HD
-                    "FHD", "1080P" -> ResolutionPreset.FHD
-                    "QHD", "2K", "1440P" -> ResolutionPreset.QHD
-                    "UHD", "4K", "2160P" -> ResolutionPreset.UHD
-                    else -> return
-                }
-                if (!availableResolutionPresets.contains(preset)) return
-                if (preset != selectedPreset) {
-                    val index = availableResolutionPresets.indexOf(preset)
+                val option = findResolutionOption(value) ?: return
+                if (option.key != selectedResolution.key) {
+                    val index = availableResolutionOptions.indexOfFirst {
+                        it.key == option.key
+                    }
                     if (index >= 0) {
                         resolutionSpinner.setSelection(index)
                     } else {
-                        selectResolutionPreset(preset)
+                        selectResolutionOption(option)
                     }
                 }
             }
@@ -1886,11 +1977,16 @@ class MainActivity : AppCompatActivity() {
                 }
             ) / 1_000L
             val supportedResolutionsCsv =
-                availableResolutionPresets.joinToString(",") { it.name }
+                availableResolutionOptions.joinToString(",") { it.key }
+            val resolutionOptionsCsv =
+                availableResolutionOptions.joinToString(";") {
+                    it.key + "|" + it.label.replace(";", " ").replace("|", " ")
+                }
 
             "{\"available\":true" +
-                ",\"resolution\":\"${selectedPreset.name}\"" +
+                ",\"resolution\":\"${selectedResolution.key}\"" +
                 ",\"supportedResolutionsCsv\":\"$supportedResolutionsCsv\"" +
+                ",\"resolutionOptionsCsv\":\"$resolutionOptionsCsv\"" +
                 ",\"quality\":\"${selectedQualityProfile.name}\"" +
                 ",\"qualityLabel\":\"${selectedQualityProfile.shortLabel}\"" +
                 ",\"jpegQuality\":$streamJpegQuality" +
@@ -2083,7 +2179,7 @@ class MainActivity : AppCompatActivity() {
         val dimensions = if (actualStreamWidth > 0 && actualStreamHeight > 0) {
             "${actualStreamWidth}×${actualStreamHeight}"
         } else {
-            selectedPreset.label
+            selectedResolution.label
         }
         val fpsLabel = if (streamTargetFps > 0) "$streamTargetFps FPS" else "FPS sem limite"
         val profileLabel = if (profile == QualityProfile.CUSTOM) "Personalizado" else profile.shortLabel
@@ -2130,17 +2226,6 @@ class MainActivity : AppCompatActivity() {
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()
-    }
-
-    private enum class ResolutionPreset(
-        val label: String,
-        val size: Size,
-        val experimental: Boolean = false
-    ) {
-        HD("720p", Size(1280, 720)),
-        FHD("1080p", Size(1920, 1080)),
-        QHD("2K / 1440p · experimental", Size(2560, 1440), true),
-        UHD("4K / 2160p · experimental", Size(3840, 2160), true)
     }
 
     private enum class QualityProfile(

@@ -11,25 +11,25 @@ import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.CamcorderProfile
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
-import android.media.MediaFormat
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
-import android.view.Surface
-import java.nio.ByteBuffer
+import android.os.ParcelFileDescriptor
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Dedicated front-camera 4K path.
+ * Front-camera UHD recording path.
  *
- * CameraX ImageAnalysis often exposes only up to 1080p/near-4K YUV on Samsung
- * front cameras even when the stock camera records UHD. This path asks the
- * public recording stack for the 2160p profile and feeds the camera directly
- * into a hardware AVC surface, avoiding the CPU YUV/JPEG path used by the
- * normal GOAT Cam stream.
+ * Build 24 used a direct MediaCodec input Surface. Some Samsung firmware accepts
+ * 4K in the stock camera while refusing that third-party Surface combination.
+ * Build 25 switches the actual capture target to MediaRecorder's own Surface,
+ * using the official 2160p profile values when available. MediaRecorder writes
+ * H.264 inside MPEG-2 TS to an in-memory pipe; the elementary Annex-B H.264
+ * payload is then forwarded to the existing RTSP server.
  */
 class Front4kDirectStreamer(
     private val context: Context,
@@ -61,133 +61,91 @@ class Front4kDirectStreamer(
     private val running = AtomicBoolean(false)
     private val starting = AtomicBoolean(false)
 
-    private var codec: MediaCodec? = null
-    private var inputSurface: Surface? = null
+    private var recorder: MediaRecorder? = null
+    private var recorderStarted = false
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
-    private var drainThread: Thread? = null
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
+
+    private var pipeRead: ParcelFileDescriptor? = null
+    private var pipeWrite: ParcelFileDescriptor? = null
+    private var readerThread: Thread? = null
 
     private var configuredWidth = 3840
     private var configuredHeight = 2160
     private var configuredFps = 30
     private var configuredBitrate = 32_000_000
-    @Volatile private var sessionConfigured = false
-    @Volatile private var firstFrameDelivered = false
+
+    @Volatile
+    private var sessionConfigured = false
+
+    @Volatile
+    private var firstFrameDelivered = false
 
     fun isRunning(): Boolean = running.get()
     fun isStarting(): Boolean = starting.get()
+
+    /** MediaRecorder has no public force-IDR API. */
+    fun requestKeyFrame() = Unit
 
     fun start(profile: Profile): Boolean {
         synchronized(lock) {
             if (running.get() || starting.get()) return true
 
-            val safeFps = profile.fps.coerceIn(5, 60)
-            val safeBitrate = profile.bitrate.coerceIn(8_000_000, 60_000_000)
+            val official = profileFor(context, profile.cameraId)
+            val effective = official ?: profile
+            val safeFps = effective.fps.coerceIn(5, 30)
+            val safeBitrate = effective.bitrate.coerceIn(8_000_000, 60_000_000)
 
             return try {
-                val encoder = MediaCodec.createEncoderByType(
-                    MediaFormat.MIMETYPE_VIDEO_AVC
-                )
-                val caps = encoder.codecInfo.getCapabilitiesForType(
-                    MediaFormat.MIMETYPE_VIDEO_AVC
-                )
-                val encoderCaps = caps.encoderCapabilities
-                val bitrateMode = if (
-                    encoderCaps.isBitrateModeSupported(
-                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
-                    )
-                ) {
-                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
-                } else {
-                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+                val pipe = ParcelFileDescriptor.createPipe()
+                pipeRead = pipe[0]
+                pipeWrite = pipe[1]
+
+                @Suppress("DEPRECATION")
+                val localRecorder = MediaRecorder().apply {
+                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_2_TS)
+                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    setVideoSize(effective.width, effective.height)
+                    setVideoFrameRate(safeFps)
+                    setVideoEncodingBitRate(safeBitrate)
+                    setOutputFile(pipeWrite!!.fileDescriptor)
+                    setOnErrorListener { _, what, extra ->
+                        fail("MediaRecorder frontal erro $what/$extra")
+                    }
+                    prepare()
                 }
 
-                val format = MediaFormat.createVideoFormat(
-                    MediaFormat.MIMETYPE_VIDEO_AVC,
-                    profile.width,
-                    profile.height
-                ).apply {
-                    setInteger(
-                        MediaFormat.KEY_COLOR_FORMAT,
-                        MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-                    )
-                    setInteger(MediaFormat.KEY_BIT_RATE, safeBitrate)
-                    setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
-                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                    setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode)
-                    runCatching { setInteger(MediaFormat.KEY_PRIORITY, 0) }
-                    runCatching {
-                        setFloat(MediaFormat.KEY_OPERATING_RATE, safeFps.toFloat())
-                    }
-                    if (Build.VERSION.SDK_INT >= 29) {
-                        runCatching { setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0) }
-                        runCatching {
-                            setInteger("prepend-sps-pps-to-idr-frames", 1)
-                        }
-                    }
-                    if (
-                        Build.VERSION.SDK_INT >= 30 &&
-                        caps.isFeatureSupported(
-                            MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
-                        )
-                    ) {
-                        runCatching { setInteger("low-latency", 1) }
-                    }
-                }
-
-                // Samsung recording pipelines are more reliable with a persistent
-                // encoder input Surface, which behaves closer to the recorder path used
-                // by the stock camera than a transient createInputSurface().
-                val surface = MediaCodec.createPersistentInputSurface()
-                encoder.configure(
-                    format,
-                    null,
-                    null,
-                    MediaCodec.CONFIGURE_FLAG_ENCODE
-                )
-                encoder.setInputSurface(surface)
-                encoder.start()
-
-                val thread = HandlerThread("goat-front-4k-camera").apply {
-                    start()
-                }
-                val handler = Handler(thread.looper)
-
-                codec = encoder
-                inputSurface = surface
-                cameraThread = thread
-                cameraHandler = handler
-                configuredWidth = profile.width
-                configuredHeight = profile.height
+                recorder = localRecorder
+                configuredWidth = effective.width
+                configuredHeight = effective.height
                 configuredFps = safeFps
                 configuredBitrate = safeBitrate
                 sessionConfigured = false
                 firstFrameDelivered = false
                 starting.set(true)
 
-                startDrainThread(encoder)
-                openCamera(profile.cameraId, handler)
+                startTsReader()
+
+                val thread = HandlerThread("goat-front-4k-mediarecorder").apply {
+                    start()
+                }
+                val handler = Handler(thread.looper)
+                cameraThread = thread
+                cameraHandler = handler
+
+                openCamera(effective.cameraId, handler)
                 true
             } catch (ex: Exception) {
                 stopLocked()
                 listener.onError(
-                    "Falha ao preparar H.264 4K frontal: " +
+                    "Falha ao preparar MediaRecorder 4K frontal: " +
                         (ex.message ?: ex.javaClass.simpleName)
                 )
                 false
             }
-        }
-    }
-
-    fun requestKeyFrame() {
-        val encoder = codec ?: return
-        if (!running.get() && !starting.get()) return
-        runCatching {
-            val params = android.os.Bundle()
-            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
-            encoder.setParameters(params)
         }
     }
 
@@ -222,7 +180,7 @@ class Front4kDirectStreamer(
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
-                    fail("Erro Camera2 no 4K frontal: " + error)
+                    fail("Erro Camera2/MediaRecorder no 4K frontal: $error")
                 }
             },
             handler
@@ -235,8 +193,8 @@ class Front4kDirectStreamer(
         cameraId: String,
         handler: Handler
     ) {
-        val surface = inputSurface ?: run {
-            fail("Surface H.264 4K frontal indisponível.")
+        val surface = recorder?.surface ?: run {
+            fail("Surface MediaRecorder 4K frontal indisponível.")
             return
         }
 
@@ -281,7 +239,7 @@ class Front4kDirectStreamer(
 
                         val ranges = chars.get(
                             CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
-                        ).orEmpty()
+                        ) ?: emptyArray()
                         val range = ranges
                             .filter {
                                 it.lower <= configuredFps &&
@@ -301,21 +259,22 @@ class Front4kDirectStreamer(
 
                     session.setRepeatingRequest(request.build(), null, handler)
                     sessionConfigured = true
+
+                    recorder?.start()
+                    recorderStarted = true
                     starting.set(false)
                     running.set(true)
 
-                    // A session can be accepted by Samsung yet deliver zero encoder
-                    // frames. Treat that as failure instead of leaving GOAT Cam frozen.
                     handler.postDelayed({
                         if (running.get() && sessionConfigured && !firstFrameDelivered) {
                             fail(
-                                "Sessão 4K frontal abriu, mas não entregou frames em 4 segundos."
+                                "MediaRecorder 4K frontal abriu, mas não entregou frames em 5 segundos."
                             )
                         }
-                    }, 4_000L)
+                    }, 5_000L)
                 } catch (ex: Exception) {
                     fail(
-                        "Falha ao iniciar captura 4K frontal: " +
+                        "Falha ao iniciar MediaRecorder 4K frontal: " +
                             (ex.message ?: ex.javaClass.simpleName)
                     )
                 }
@@ -323,7 +282,7 @@ class Front4kDirectStreamer(
 
             override fun onConfigureFailed(session: CameraCaptureSession) {
                 fail(
-                    "A câmera recusou a sessão frontal " +
+                    "A câmera recusou a sessão MediaRecorder frontal " +
                         configuredWidth + "x" + configuredHeight + " H.264."
                 )
             }
@@ -331,6 +290,7 @@ class Front4kDirectStreamer(
 
         if (Build.VERSION.SDK_INT >= 28) {
             val output = OutputConfiguration(surface)
+
             if (Build.VERSION.SDK_INT >= 33) {
                 runCatching {
                     val useCases = manager
@@ -362,81 +322,203 @@ class Front4kDirectStreamer(
         }
     }
 
-    private fun startDrainThread(encoder: MediaCodec) {
-        drainThread = Thread {
-            val info = MediaCodec.BufferInfo()
-            while (
-                (starting.get() || running.get()) &&
-                codec === encoder
-            ) {
-                try {
-                    when (val index = encoder.dequeueOutputBuffer(info, 10_000)) {
-                        MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
-                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            val format = encoder.outputFormat
-                            listOf("csd-0", "csd-1").forEach { key ->
-                                format.getByteBuffer(key)
-                                    ?.let(::byteBufferToBytes)
-                                    ?.takeIf { it.isNotEmpty() }
-                                    ?.let { bytes ->
-                                        listener.onAccessUnit(
-                                            bytes,
-                                            0L,
-                                            false,
-                                            true
-                                        )
-                                    }
-                            }
-                        }
-                        else -> if (index >= 0) {
-                            val output = encoder.getOutputBuffer(index)
-                            if (output != null && info.size > 0) {
-                                output.position(info.offset)
-                                output.limit(info.offset + info.size)
-                                val bytes = ByteArray(info.size)
-                                output.get(bytes)
-                                if (!firstFrameDelivered && sessionConfigured) {
-                                    firstFrameDelivered = true
-                                    listener.onStarted(
-                                        configuredWidth,
-                                        configuredHeight,
-                                        configuredFps,
-                                        configuredBitrate
+    private fun startTsReader() {
+        val readFd = pipeRead ?: return
+
+        readerThread = Thread {
+            val input = BufferedInputStream(
+                ParcelFileDescriptor.AutoCloseInputStream(readFd),
+                512 * 1024
+            )
+            val packet = ByteArray(188)
+            var videoPid = -1
+            var pesData = ByteArrayOutputStream(512 * 1024)
+            var pesPtsUs = 0L
+            var havePes = false
+
+            fun flushPes() {
+                if (!havePes || pesData.size() == 0) return
+                val bytes = pesData.toByteArray()
+                if (bytes.isNotEmpty()) {
+                    if (!firstFrameDelivered && sessionConfigured) {
+                        firstFrameDelivered = true
+                        listener.onStarted(
+                            configuredWidth,
+                            configuredHeight,
+                            configuredFps,
+                            configuredBitrate
+                        )
+                    }
+                    listener.onAccessUnit(
+                        bytes,
+                        if (pesPtsUs > 0L) {
+                            pesPtsUs
+                        } else {
+                            System.nanoTime() / 1000L
+                        },
+                        containsH264Idr(bytes),
+                        false
+                    )
+                }
+                pesData = ByteArrayOutputStream(512 * 1024)
+            }
+
+            try {
+                while (starting.get() || running.get()) {
+                    if (!readTsPacket(input, packet)) break
+                    if ((packet[0].toInt() and 0xff) != 0x47) continue
+
+                    val payloadStart =
+                        (packet[1].toInt() and 0x40) != 0
+                    val pid =
+                        ((packet[1].toInt() and 0x1f) shl 8) or
+                            (packet[2].toInt() and 0xff)
+                    val afc =
+                        (packet[3].toInt() ushr 4) and 0x03
+                    if (afc == 0 || afc == 2) continue
+
+                    var offset = 4
+                    if (afc == 3) {
+                        if (offset >= packet.size) continue
+                        val adaptationLength =
+                            packet[offset].toInt() and 0xff
+                        offset += 1 + adaptationLength
+                    }
+                    if (offset >= packet.size) continue
+
+                    if (payloadStart) {
+                        val pes = parsePesHeader(packet, offset)
+                        if (pes != null && pes.video) {
+                            if (videoPid < 0) videoPid = pid
+                            if (pid == videoPid) {
+                                flushPes()
+                                havePes = true
+                                pesPtsUs = pes.ptsUs
+                                if (pes.payloadOffset < packet.size) {
+                                    pesData.write(
+                                        packet,
+                                        pes.payloadOffset,
+                                        packet.size - pes.payloadOffset
                                     )
                                 }
-                                listener.onAccessUnit(
-                                    bytes,
-                                    info.presentationTimeUs,
-                                    (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
-                                    (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
-                                )
                             }
-                            encoder.releaseOutputBuffer(index, false)
+                            continue
                         }
                     }
-                } catch (_: Exception) {
-                    break
+
+                    if (pid == videoPid && havePes) {
+                        pesData.write(packet, offset, packet.size - offset)
+                    }
                 }
+            } catch (_: Exception) {
+            } finally {
+                flushPes()
+                runCatching { input.close() }
             }
         }.apply {
-            name = "goat-front-4k-h264-drain"
+            name = "goat-front-4k-ts-reader"
             isDaemon = true
             start()
         }
     }
 
-    private fun byteBufferToBytes(buffer: ByteBuffer): ByteArray {
-        val duplicate = buffer.duplicate()
-        val bytes = ByteArray(duplicate.remaining())
-        duplicate.get(bytes)
-        return bytes
+    private data class PesHeader(
+        val video: Boolean,
+        val payloadOffset: Int,
+        val ptsUs: Long
+    )
+
+    private fun parsePesHeader(packet: ByteArray, offset: Int): PesHeader? {
+        if (offset + 9 > packet.size) return null
+        if (
+            packet[offset] != 0.toByte() ||
+            packet[offset + 1] != 0.toByte() ||
+            packet[offset + 2] != 1.toByte()
+        ) {
+            return null
+        }
+
+        val streamId = packet[offset + 3].toInt() and 0xff
+        val video = streamId in 0xE0..0xEF
+        if (!video) return PesHeader(false, offset, 0L)
+
+        val flags2 = packet[offset + 7].toInt() and 0xff
+        val headerLength = packet[offset + 8].toInt() and 0xff
+        val payloadOffset = offset + 9 + headerLength
+        if (payloadOffset > packet.size) return null
+
+        var ptsUs = 0L
+        if ((flags2 and 0x80) != 0 && offset + 14 <= packet.size) {
+            val b0 = packet[offset + 9].toLong() and 0xffL
+            val b1 = packet[offset + 10].toLong() and 0xffL
+            val b2 = packet[offset + 11].toLong() and 0xffL
+            val b3 = packet[offset + 12].toLong() and 0xffL
+            val b4 = packet[offset + 13].toLong() and 0xffL
+
+            val pts90k =
+                (((b0 shr 1) and 0x07L) shl 30) or
+                    (b1 shl 22) or
+                    (((b2 shr 1) and 0x7fL) shl 15) or
+                    (b3 shl 7) or
+                    ((b4 shr 1) and 0x7fL)
+            ptsUs = pts90k * 1_000_000L / 90_000L
+        }
+
+        return PesHeader(true, payloadOffset, ptsUs)
+    }
+
+    private fun containsH264Idr(data: ByteArray): Boolean {
+        var i = 0
+        while (i + 4 < data.size) {
+            var startLength = 0
+            if (
+                data[i] == 0.toByte() &&
+                data[i + 1] == 0.toByte() &&
+                data[i + 2] == 1.toByte()
+            ) {
+                startLength = 3
+            } else if (
+                data[i] == 0.toByte() &&
+                data[i + 1] == 0.toByte() &&
+                data[i + 2] == 0.toByte() &&
+                data[i + 3] == 1.toByte()
+            ) {
+                startLength = 4
+            }
+
+            if (startLength > 0) {
+                val nalIndex = i + startLength
+                if (nalIndex < data.size) {
+                    val nalType = data[nalIndex].toInt() and 0x1f
+                    if (nalType == 5) return true
+                }
+                i += startLength
+            } else {
+                i++
+            }
+        }
+        return false
+    }
+
+    private fun readTsPacket(
+        input: BufferedInputStream,
+        packet: ByteArray
+    ): Boolean {
+        var total = 0
+        while (total < packet.size) {
+            val read = input.read(packet, total, packet.size - total)
+            if (read < 0) return false
+            total += read
+        }
+        return true
     }
 
     private fun fail(message: String) {
         synchronized(lock) {
+            val wasActive = running.get() || starting.get()
             stopLocked()
+            if (wasActive) listener.onError(message)
         }
-        listener.onError(message)
     }
 
     private fun stopLocked() {
@@ -453,27 +535,29 @@ class Front4kDirectStreamer(
         runCatching { cameraDevice?.close() }
         cameraDevice = null
 
-        val localCodec = codec
-        codec = null
-        runCatching { localCodec?.signalEndOfInputStream() }
-        runCatching { localCodec?.stop() }
-        runCatching { localCodec?.release() }
+        val localRecorder = recorder
+        recorder = null
+        if (recorderStarted) {
+            runCatching { localRecorder?.stop() }
+        }
+        recorderStarted = false
+        runCatching { localRecorder?.reset() }
+        runCatching { localRecorder?.release() }
 
-        runCatching { inputSurface?.release() }
-        inputSurface = null
+        runCatching { pipeWrite?.close() }
+        pipeWrite = null
+        runCatching { pipeRead?.close() }
+        pipeRead = null
 
         runCatching { cameraThread?.quitSafely() }
         cameraThread = null
         cameraHandler = null
-        drainThread = null
+        readerThread = null
     }
 
     companion object {
         @Suppress("DEPRECATION")
-        fun profileFor(
-            context: Context,
-            cameraId: String
-        ): Profile? {
+        fun profileFor(context: Context, cameraId: String): Profile? {
             val manager =
                 context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val chars = runCatching {
@@ -505,7 +589,7 @@ class Front4kDirectStreamer(
                 if (preferred != null) {
                     return Profile(
                         cameraId = cameraId,
-                        fps = preferred.frameRate.coerceIn(5, 60),
+                        fps = preferred.frameRate.coerceIn(5, 30),
                         bitrate = preferred.bitrate.coerceIn(
                             8_000_000,
                             60_000_000
@@ -536,7 +620,7 @@ class Front4kDirectStreamer(
                 ) {
                     return Profile(
                         cameraId = cameraId,
-                        fps = profile.videoFrameRate.coerceIn(5, 60),
+                        fps = profile.videoFrameRate.coerceIn(5, 30),
                         bitrate = profile.videoBitRate.coerceIn(
                             8_000_000,
                             60_000_000
@@ -546,8 +630,6 @@ class Front4kDirectStreamer(
                 }
             }
 
-            // Probe the public recording/private Surface maps per front camera.
-            // This avoids the old hardcode that exposed 4K only on camera ID 1.
             val map = chars.get(
                 CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
             )
@@ -572,10 +654,6 @@ class Front4kDirectStreamer(
                 )
             }
 
-            // Some Galaxy S21 firmware hides UHD front recording from the public
-            // size maps although the stock app offers it. Permit an experimental
-            // attempt on every real front camera with a sufficiently large sensor;
-            // the 4-second watchdog prevents an unsupported path from hanging.
             val samsungS21 =
                 Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
                     Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)

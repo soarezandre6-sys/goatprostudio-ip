@@ -10,6 +10,7 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.media.CamcorderProfile
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -845,6 +846,45 @@ class MainActivity : AppCompatActivity() {
         manager: CameraManager
     ): DirectCameraSource? {
         val target = Size(7680, 4320)
+
+        // Prefer the logical camera that Samsung/Android itself associates
+        // with the official 8K camcorder profile. This is more reliable than
+        // forcing the largest physical sensor directly.
+        if (Build.VERSION.SDK_INT >= 31) {
+            for (logicalId in manager.cameraIdList) {
+                val chars = runCatching {
+                    manager.getCameraCharacteristics(logicalId)
+                }.getOrNull() ?: continue
+
+                if (
+                    chars.get(CameraCharacteristics.LENS_FACING) !=
+                        CameraCharacteristics.LENS_FACING_BACK
+                ) {
+                    continue
+                }
+
+                val profiles = runCatching {
+                    CamcorderProfile.getAll(
+                        logicalId,
+                        CamcorderProfile.QUALITY_8KUHD
+                    )
+                }.getOrNull()
+
+                val exact8k = profiles?.videoProfiles
+                    ?.firstOrNull {
+                        it.width == target.width &&
+                            it.height == target.height
+                    }
+
+                if (exact8k != null) {
+                    return DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = null
+                    )
+                }
+            }
+        }
+
         var sensorFallback: DirectCameraSource? = null
         var largestSensorSource: DirectCameraSource? = null
         var largestSensorPixels = 0L

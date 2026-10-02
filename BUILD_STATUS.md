@@ -584,3 +584,18 @@ Branch: `build-15-goat-cam`
 - APK SHA-256: `ec3d0c08809874e3fe995350b585f2270283c0635cbb3efd81a3107a3fa2d5f0`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: validar 4K restaurado, Tele/Tele 3x e tentativa 8K 7680×4320 a 10 FPS.
+
+
+## Build 16 — correção da sessão 8K recusada
+Branch: `build-16-goat-cam`
+
+- criada a partir da Build 15 testada no Galaxy S21;
+- diagnóstico do teste: a opção 8K 7680×4320 aparece, porém a sessão Camera2/HEVC retorna `onConfigureFailed` antes de enviar vídeo ao PC;
+- a busca 8K agora prioriza o ID lógico traseiro que o Android/Samsung associa ao perfil oficial `CamcorderProfile.QUALITY_8KUHD`;
+- quando existe perfil 8K oficial, não força diretamente o ID físico do maior sensor;
+- sessão HEVC usa `OutputConfiguration` + `SessionConfiguration` também para câmera lógica;
+- em Android 13+ a saída marca `SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD` quando o dispositivo anuncia suporte;
+- request usa explicitamente `CONTROL_CAPTURE_INTENT_VIDEO_RECORD`;
+- ao trocar de um stream funcionando para 8K, o app guarda a resolução anterior;
+- se a câmera recusar 8K, o app restaura automaticamente a resolução anterior e reinicia a transmissão, evitando deixar o PC congelado sem stream;
+- nenhuma APK da Build 16 foi gerada nesta etapa.

@@ -1,6 +1,6 @@
 # GOAT Cam Build 26
 
-Status: código preparado; APK ainda não gerado.
+Status: APK de teste compilado com sucesso em 2026-10-02.
 
 ## 4K frontal
 - Build 24 Camera2 + MediaCodec: recusado no aparelho.
@@ -17,5 +17,16 @@ Status: código preparado; APK ainda não gerado.
 - ao voltar ao app, o encoder direto é encerrado e Preview + ImageAnalysis são restaurados.
 - se o caminho direto não abrir, há fallback automático para o modo headless da Build 25.
 
-## Observação
-A Build 26 ainda precisa de compilação e teste no aparelho.
+## Build
+- workflow: Android Debug APK run 37075554098
+- resultado: success
+- artefato: goat-cam-build-26-debug
+- artifact id: 11256691092
+- APK extraído: GOAT-Cam-Build-26-Teste.apk
+- SHA-256 do APK: `5bf2ac3287397947a018b49e5cc2bf4ee5b0f68641508d31ce4edb03a464bb26`
+
+## Próximo teste no aparelho
+1. verificar se o 4K frontal aparece; se aparecer, iniciar transmissão e observar se abre sem travar;
+2. em Full HD RTSP, apertar Home e depois bloquear a tela;
+3. observar fluidez, aquecimento e se a conexão permanece contínua;
+4. voltar ao app e confirmar se o preview retorna sem derrubar a transmissão.

@@ -484,7 +484,7 @@ class MjpegServer(
                   if(current) select.value=current;
                   document.getElementById('resolutionSupport').textContent=
                     rows.length
-                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · limite atual do GOAT Cam: 4K'
+                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · 8K aparece somente quando câmera + encoder HEVC suportarem'
                       : 'Não foi possível ler as resoluções da câmera';
                 }
 

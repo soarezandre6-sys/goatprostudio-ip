@@ -159,6 +159,7 @@ class CameraX8kRecorderProbe(
                             cleanupFile()
                         }
                     }
+                }
 
             true
         } catch (ex: Exception) {

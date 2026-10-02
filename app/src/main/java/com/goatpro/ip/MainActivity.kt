@@ -64,6 +64,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var copyAddressButton: Button
     private lateinit var vendorDiagnosticButton: Button
     private lateinit var vendorDiagnosticText: TextView
+    private lateinit var local8kTestButton: Button
+    private lateinit var local8kTestText: TextView
     private lateinit var websiteButton: Button
     private lateinit var cameraLensSpinner: Spinner
     private lateinit var resolutionSpinner: Spinner
@@ -113,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private var actualStreamHeight = 0
     private var fallbackResolutionAfterHevcFailure: ResolutionOption? = null
     private var autoRestartStreamAfterCameraBind = false
+    private var pendingLocal8kProfileTest = false
 
     private var metricsWindowStartedNs = 0L
     private var analysisFrameCount = 0
@@ -532,6 +535,133 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private val local8kProfileRecorder:
+        Local8kProfileRecorder by lazy {
+        Local8kProfileRecorder(
+            this,
+            object : Local8kProfileRecorder.Listener {
+                override fun onProfileFound(
+                    cameraId: String,
+                    width: Int,
+                    height: Int,
+                    fps: Int,
+                    bitrate: Int,
+                    videoCodec: Int,
+                    fileFormat: Int
+                ) {
+                    runOnUiThread {
+                        local8kTestText.text =
+                            "Perfil oficial encontrado • câmera " +
+                                cameraId + " • " +
+                                width + "×" + height +
+                                " • " + fps + " FPS"
+                        performanceText.text =
+                            "CamcorderProfile 8KUHD • " +
+                                String.format(
+                                    java.util.Locale.US,
+                                    "%.1f Mbps",
+                                    bitrate / 1_000_000.0
+                                )
+                    }
+                }
+
+                override fun onStarted(
+                    file: java.io.File,
+                    width: Int,
+                    height: Int
+                ) {
+                    runOnUiThread {
+                        statusText.text =
+                            "GRAVANDO TESTE LOCAL 8K • 5 SEGUNDOS"
+                        statusText.setTextColor(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                R.color.green
+                            )
+                        )
+                        local8kTestText.text =
+                            "Sessão aceita • gravando " +
+                                width + "×" + height +
+                                " no próprio celular…"
+                    }
+                }
+
+                override fun onCompleted(
+                    file: java.io.File,
+                    actualWidth: Int,
+                    actualHeight: Int,
+                    durationMs: Long
+                ) {
+                    runOnUiThread {
+                        local8kTestButton.isEnabled = true
+                        val exact8k =
+                            actualWidth == 7680 &&
+                                actualHeight == 4320
+
+                        if (exact8k) {
+                            statusText.text =
+                                "8K LOCAL ACEITO • 7680×4320"
+                            statusText.setTextColor(
+                                ContextCompat.getColor(
+                                    this@MainActivity,
+                                    R.color.green
+                                )
+                            )
+                            local8kTestText.text =
+                                "SUCESSO • arquivo 7680×4320 • " +
+                                    (durationMs / 1000.0) + " s • " +
+                                    file.name
+                            Toast.makeText(
+                                this@MainActivity,
+                                "8K LOCAL ACEITO: 7680×4320.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            setError(
+                                "Teste local gravou " +
+                                    actualWidth + "×" +
+                                    actualHeight +
+                                    ", não 7680×4320"
+                            )
+                            local8kTestText.text =
+                                "Arquivo final: " +
+                                    actualWidth + "×" +
+                                    actualHeight + " • " +
+                                    file.name
+                            Toast.makeText(
+                                this@MainActivity,
+                                "O perfil abriu, mas o arquivo não ficou em 8K real.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+
+                        startCamera()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        local8kTestButton.isEnabled = true
+                        setError("8K local recusado • " + message)
+                        local8kTestText.text = message
+                        Toast.makeText(
+                            this@MainActivity,
+                            "8K local recusado.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        startCamera()
+                    }
+                }
+
+                override fun onStopped() {
+                    runOnUiThread {
+                        local8kTestButton.isEnabled = true
+                    }
+                }
+            }
+        )
+    }
+
     private val audioCapture by lazy {
         AudioCapture(this, server::offerAudio)
     }
@@ -560,19 +690,43 @@ class MainActivity : AppCompatActivity() {
     private val audioPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        audioEnabled = granted
-        server.setAudioEnabled(granted)
-        if (granted && server.isRunning()) {
-            if (!audioCapture.start()) {
-                audioEnabled = false
-                server.setAudioEnabled(false)
-                Toast.makeText(this, "Não foi possível iniciar o microfone.", Toast.LENGTH_SHORT).show()
+        if (pendingLocal8kProfileTest) {
+            pendingLocal8kProfileTest = false
+            if (granted) {
+                startLocal8kProfileTestNow()
+            } else {
+                local8kTestButton.isEnabled = true
+                local8kTestText.text =
+                    "Teste 8K cancelado: permissão de microfone necessária para o perfil oficial."
+                Toast.makeText(
+                    this,
+                    "O perfil oficial 8KUHD precisa da permissão de microfone para este teste.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+        } else {
+            audioEnabled = granted
+            server.setAudioEnabled(granted)
+            if (granted && server.isRunning()) {
+                if (!audioCapture.start()) {
+                    audioEnabled = false
+                    server.setAudioEnabled(false)
+                    Toast.makeText(
+                        this,
+                        "Não foi possível iniciar o microfone.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            if (!granted) {
+                Toast.makeText(
+                    this,
+                    "Permissão de microfone não concedida.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            updateAudioButton()
         }
-        if (!granted) {
-            Toast.makeText(this, "Permissão de microfone não concedida.", Toast.LENGTH_SHORT).show()
-        }
-        updateAudioButton()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -594,6 +748,10 @@ class MainActivity : AppCompatActivity() {
             findViewById(R.id.vendorDiagnosticButton)
         vendorDiagnosticText =
             findViewById(R.id.vendorDiagnosticText)
+        local8kTestButton =
+            findViewById(R.id.local8kTestButton)
+        local8kTestText =
+            findViewById(R.id.local8kTestText)
         websiteButton = findViewById(R.id.websiteButton)
         cameraLensSpinner = findViewById(R.id.cameraLensSpinner)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
@@ -619,7 +777,9 @@ class MainActivity : AppCompatActivity() {
             if (
                 server.isRunning() ||
                 cameraX8kRecorderProbe.isRunning() ||
-                cameraX8kRecorderProbe.isStarting()
+                cameraX8kRecorderProbe.isStarting() ||
+                local8kProfileRecorder.isRunning() ||
+                local8kProfileRecorder.isStarting()
             ) {
                 stopStreaming()
             } else {
@@ -637,6 +797,9 @@ class MainActivity : AppCompatActivity() {
         vendorDiagnosticButton.setOnClickListener {
             runVendor8kDiagnostic()
         }
+        local8kTestButton.setOnClickListener {
+            requestLocal8kProfileTest()
+        }
         websiteButton.setOnClickListener { openGoatProStudioWebsite() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -644,6 +807,81 @@ class MainActivity : AppCompatActivity() {
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun requestLocal8kProfileTest() {
+        if (
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Toast.makeText(
+                this,
+                "Permissão de câmera necessária.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        local8kTestButton.isEnabled = false
+        local8kTestText.text =
+            "Preparando CamcorderProfile.QUALITY_8KUHD…"
+
+        if (
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingLocal8kProfileTest = true
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+
+        startLocal8kProfileTestNow()
+    }
+
+    private fun startLocal8kProfileTestNow() {
+        local8kTestButton.isEnabled = false
+        local8kTestText.text =
+            "Abrindo perfil oficial 8KUHD e câmera Samsung…"
+
+        audioCapture.stop()
+        server.setAudioEnabled(false)
+        h264Encoder.stop()
+        local8kProfileRecorder.stop()
+        cameraX8kRecorderProbe.stop()
+        mediaRecorderHevcStreamer.stop()
+        hevcDirectStreamer.stop()
+        rtspServer.stop()
+        hevcRtspServer.stop()
+        server.stop()
+
+        val providerFuture =
+            ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                provider.unbindAll()
+                previewUseCase = null
+                analysisUseCase = null
+                currentCamera = null
+                updateTorchButton()
+
+                val started = local8kProfileRecorder.start()
+                if (!started) {
+                    local8kTestButton.isEnabled = true
+                }
+            } catch (ex: Exception) {
+                local8kTestButton.isEnabled = true
+                val message =
+                    ex.message ?: ex.javaClass.simpleName
+                setError("Teste local 8K: " + message)
+                local8kTestText.text = message
+                startCamera()
+            }
+        }, ContextCompat.getMainExecutor(this))
     }
 
     private fun runVendor8kDiagnostic() {
@@ -1860,7 +2098,9 @@ class MainActivity : AppCompatActivity() {
                     mediaRecorderHevcStreamer.isRunning() ||
                     mediaRecorderHevcStreamer.isStarting() ||
                     cameraX8kRecorderProbe.isRunning() ||
-                    cameraX8kRecorderProbe.isStarting()
+                    cameraX8kRecorderProbe.isStarting() ||
+                    local8kProfileRecorder.isRunning() ||
+                    local8kProfileRecorder.isStarting()
                 ) {
                     return@addListener
                 }
@@ -3094,6 +3334,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        local8kProfileRecorder.stop()
         cameraX8kRecorderProbe.stop()
         mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
@@ -3320,6 +3561,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        local8kProfileRecorder.stop()
         cameraX8kRecorderProbe.stop()
         mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
@@ -3504,6 +3746,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        local8kProfileRecorder.stop()
         cameraX8kRecorderProbe.stop()
         mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()

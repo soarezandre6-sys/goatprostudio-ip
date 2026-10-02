@@ -96,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     private var streamJpegQuality = QualityProfile.BALANCED.jpegQuality
 
     @Volatile
-    private var streamTargetFps = QualityProfile.BALANCED.targetFps
+    private var streamTargetFps = DEFAULT_START_FPS
 
     @Volatile
     private var selectedRotationMode = RotationMode.AUTO
@@ -603,10 +603,12 @@ class MainActivity : AppCompatActivity() {
             "jpeg_quality",
             selectedQualityProfile.jpegQuality
         ).coerceIn(1, 100)
-        streamTargetFps = prefs.getInt(
-            "target_fps",
-            selectedQualityProfile.targetFps
-        ).let { if (it <= 0) 0 else it.coerceIn(5, 120) }
+        // Segurança térmica/performance: cada nova abertura do app volta a 30 FPS.
+        // O usuário pode subir manualmente depois para 60/120 quando suportado.
+        streamTargetFps = DEFAULT_START_FPS
+        if (selectedQualityProfile.targetFps != DEFAULT_START_FPS) {
+            selectedQualityProfile = QualityProfile.CUSTOM
+        }
         streamBitrateBps = prefs.getInt("bitrate_bps", 0)
             .coerceIn(0, 60_000_000)
         watermarkEnabled = prefs.getBoolean("watermark_enabled", true)
@@ -1230,6 +1232,16 @@ class MainActivity : AppCompatActivity() {
         selectedCameraOption = option
         lensFacing = option.facing
         preferredCameraKey = option.key
+        streamTargetFps = DEFAULT_START_FPS
+        nextEncodeDueNs = 0L
+        if (selectedQualityProfile.targetFps != DEFAULT_START_FPS) {
+            selectedQualityProfile = QualityProfile.CUSTOM
+            if (::qualitySpinner.isInitialized) {
+                qualitySpinner.setSelection(
+                    QualityProfile.entries.indexOf(QualityProfile.CUSTOM)
+                )
+            }
+        }
         saveSmartLinkState()
 
         if (updateSpinner) {
@@ -1433,27 +1445,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyHighResolutionDefaults(option: ResolutionOption) {
+        // Toda troca de resolução volta ao ponto seguro de 30 FPS.
+        // 60/120 FPS só entram por escolha manual posterior do usuário.
+        streamTargetFps = DEFAULT_START_FPS
         val width = option.size.width
         when {
             option.directFront4k -> {
                 streamJpegQuality = 50
-                streamTargetFps = option.directFps ?: 30
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width >= 3840 -> {
                 streamJpegQuality = 50
-                streamTargetFps = 10
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width > 1920 -> {
                 streamJpegQuality = 58
-                streamTargetFps = 15
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
-            else -> return
+            selectedQualityProfile.targetFps != DEFAULT_START_FPS -> {
+                selectedQualityProfile = QualityProfile.CUSTOM
+            }
         }
 
-        if (::qualitySpinner.isInitialized) {
+        nextEncodeDueNs = 0L
+        if (::qualitySpinner.isInitialized && selectedQualityProfile == QualityProfile.CUSTOM) {
             qualitySpinner.setSelection(
                 QualityProfile.entries.indexOf(QualityProfile.CUSTOM)
             )
@@ -3208,7 +3223,10 @@ class MainActivity : AppCompatActivity() {
                         cameraId = cameraId,
                         width = selectedResolution.size.width,
                         height = selectedResolution.size.height,
-                        fps = selectedResolution.directFps ?: 60,
+                        fps = (
+                            if (streamTargetFps > 0) streamTargetFps
+                            else DEFAULT_START_FPS
+                        ).coerceIn(5, 60),
                         bitrate =
                             if (streamBitrateBps > 0) {
                                 streamBitrateBps
@@ -3547,10 +3565,10 @@ class MainActivity : AppCompatActivity() {
             20
         ),
         BALANCED(
-            "Equilibrado • Q65 • 20 FPS",
+            "Equilibrado • Q65 • 30 FPS",
             "Equilibrado",
             65,
-            20
+            30
         ),
         HIGH_QUALITY(
             "Alta qualidade • Q80 • 20 FPS",
@@ -3588,5 +3606,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PREVIEW_HEIGHT_RATIO = 9f / 16f
+        private const val DEFAULT_START_FPS = 30
     }
 }

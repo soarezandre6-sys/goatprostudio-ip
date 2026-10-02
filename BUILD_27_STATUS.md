@@ -16,6 +16,13 @@ Status: código integrado; APK ainda não gerado.
 - H.264 foi liberado para até 120 FPS.
 - segundo plano leve foi liberado para até 60 FPS.
 
+## Padrão de FPS
+- toda nova abertura do app inicia em 30 FPS.
+- trocar câmera/lente ou resolução também volta para 30 FPS.
+- 60 e 120 FPS continuam disponíveis somente por escolha manual e quando suportados.
+- Smart Link não restaura automaticamente um FPS alto de uma sessão anterior.
+- o 4K frontal também parte de 30 FPS e só sobe se o usuário escolher depois.
+
 ## Segurança
 - Build 26 preservada.
 - checkpoint: `checkpoint-build26-before-fps4k-2026-10-02`.

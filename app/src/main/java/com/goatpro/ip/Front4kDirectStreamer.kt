@@ -29,7 +29,7 @@ class Front4kDirectStreamer(
         val cameraId: String,
         val width: Int = 3840,
         val height: Int = 2160,
-        val fps: Int = 60,
+        val fps: Int = 30,
         val bitrate: Int = 48_000_000,
         val fromOfficialProfile: Boolean = false,
         val legacyCameraId: Int = -1
@@ -61,7 +61,7 @@ class Front4kDirectStreamer(
 
     private var configuredWidth = 3840
     private var configuredHeight = 2160
-    private var configuredFps = 60
+    private var configuredFps = 30
     private var configuredBitrate = 48_000_000
 
     @Volatile

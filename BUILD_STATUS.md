@@ -568,3 +568,19 @@ Branch: `build-15-goat-cam`
 - quando a tele não aparece como ID físico, mas a câmera lógica suporta zoom de pelo menos 3x, o seletor adiciona `Tele • 3x` e solicita zoom ao HAL para permitir que a Samsung faça a troca interna de sensor;
 - para a família Galaxy S21 `SM-G99x`, a busca 8K também considera o maior sensor traseiro como fallback experimental, porque o app nativo oferece 8K mesmo quando a API pública pode subdeclarar os modos;
 - nenhuma APK foi gerada nesta etapa.
+
+
+### APK de teste — Build 15
+- workflow: Android Debug APK;
+- run: 37051232462 (#25);
+- conclusão: success;
+- branch: `build-15-goat-cam`;
+- head commit da execução: `813ba0c21d4b709224bdc3331f490eadeb9e80bb`;
+- artifact: `goat-cam-build-15-debug`;
+- artifact id: 11245924836;
+- artifact digest: `sha256:0af4589a2e2d0703a4b8eeff266d29dac42907ee68154087d5a6395d02b7966d`;
+- APK: `GOAT-Cam-Build-15-Teste.apk`;
+- tamanho do APK: 4.850.280 bytes;
+- APK SHA-256: `ec3d0c08809874e3fe995350b585f2270283c0635cbb3efd81a3107a3fa2d5f0`;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: validar 4K restaurado, Tele/Tele 3x e tentativa 8K 7680×4320 a 10 FPS.

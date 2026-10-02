@@ -464,6 +464,72 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private val cameraX8kRecorderProbe:
+        CameraX8kRecorderProbe by lazy {
+        CameraX8kRecorderProbe(
+            this,
+            object : CameraX8kRecorderProbe.Listener {
+                override fun onNegotiated(
+                    width: Int,
+                    height: Int,
+                    selectedQuality: String
+                ) {
+                    runOnUiThread {
+                        actualStreamWidth = width
+                        actualStreamHeight = height
+                        performanceText.text =
+                            "CameraX negociou " +
+                                width + "×" + height +
+                                " • " + selectedQuality
+                        updateStreamInfo()
+                    }
+                }
+
+                override fun onStarted(
+                    width: Int,
+                    height: Int
+                ) {
+                    runOnUiThread {
+                        actualStreamWidth = width
+                        actualStreamHeight = height
+                        statusText.text =
+                            "8K 7680×4320 ACEITO PELO CAMERAX"
+                        statusText.setTextColor(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                R.color.green
+                            )
+                        )
+                        performanceText.text =
+                            "CameraX VideoCapture/Recorder • " +
+                                width + "×" + height +
+                                " • sessão ativa"
+                        streamButton.text = "Parar teste 8K"
+                        streamButton.setBackgroundResource(
+                            R.drawable.bg_button_danger
+                        )
+                        streamButton.backgroundTintList = null
+                        streamButton.setTextColor(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                android.R.color.white
+                            )
+                        )
+                        updateStreamInfo()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        handleCameraX8kFailure(message)
+                    }
+                }
+
+                override fun onStopped() = Unit
+            }
+        )
+    }
+
     private val audioCapture by lazy {
         AudioCapture(this, server::offerAudio)
     }
@@ -544,7 +610,15 @@ class MainActivity : AppCompatActivity() {
         updateTorchButton()
 
         streamButton.setOnClickListener {
-            if (server.isRunning()) stopStreaming() else startStreaming()
+            if (
+                server.isRunning() ||
+                cameraX8kRecorderProbe.isRunning() ||
+                cameraX8kRecorderProbe.isStarting()
+            ) {
+                stopStreaming()
+            } else {
+                startStreaming()
+            }
         }
 
         switchCameraButton.setOnClickListener {
@@ -1704,7 +1778,9 @@ class MainActivity : AppCompatActivity() {
                     hevcDirectStreamer.isRunning() ||
                     hevcDirectStreamer.isStarting() ||
                     mediaRecorderHevcStreamer.isRunning() ||
-                    mediaRecorderHevcStreamer.isStarting()
+                    mediaRecorderHevcStreamer.isStarting() ||
+                    cameraX8kRecorderProbe.isRunning() ||
+                    cameraX8kRecorderProbe.isStarting()
                 ) {
                     return@addListener
                 }
@@ -2859,7 +2935,167 @@ class MainActivity : AppCompatActivity() {
         audioButton.text = if (audioEnabled) "Áudio: ativado" else "Áudio: desligado"
     }
 
+    private fun handleCameraX8kFailure(message: String) {
+        cameraX8kRecorderProbe.stop()
+        mediaRecorderHevcStreamer.stop()
+        hevcDirectStreamer.stop()
+        hevcRtspServer.stop()
+        rtspServer.stop()
+        server.stop()
+        audioCapture.stop()
+        server.setAudioEnabled(false)
+        updateConnectionStatus(0)
+
+        val fallback =
+            fallbackResolutionAfterHevcFailure
+                ?: availableResolutionOptions.firstOrNull {
+                    !it.directHevc &&
+                        it.key == "3840x2160"
+                }
+                ?: availableResolutionOptions.firstOrNull {
+                    !it.directHevc
+                }
+
+        if (fallback != null) {
+            fallbackResolutionAfterHevcFailure = null
+            selectedResolution = fallback
+            applyHighResolutionDefaults(fallback)
+
+            if (::resolutionSpinner.isInitialized) {
+                val index =
+                    availableResolutionOptions.indexOfFirst {
+                        it.key == fallback.key
+                    }
+                if (index >= 0) {
+                    resolutionSpinner.setSelection(index)
+                }
+            }
+
+            actualStreamWidth = 0
+            actualStreamHeight = 0
+            nextEncodeDueNs = 0L
+            resetPerformanceStats()
+            updateStreamInfo()
+            refreshAddress()
+
+            setError(
+                "8K CameraX recusado • " + message
+            )
+            Toast.makeText(
+                this,
+                "8K CameraX recusado. Voltando para " +
+                    fallback.label + ".",
+                Toast.LENGTH_LONG
+            ).show()
+
+            autoRestartStreamAfterCameraBind = true
+            startCamera()
+            return
+        }
+
+        setError("8K CameraX: " + message)
+        streamButton.text = "Iniciar transmissão"
+        streamButton.setBackgroundResource(
+            R.drawable.bg_button_primary
+        )
+        streamButton.backgroundTintList = null
+        streamButton.setTextColor(
+            ContextCompat.getColor(this, R.color.black)
+        )
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_LONG
+        ).show()
+        startCamera()
+    }
+
+    private fun startCameraX8kTest() {
+        audioCapture.stop()
+        server.setAudioEnabled(false)
+        h264Encoder.stop()
+        cameraX8kRecorderProbe.stop()
+        mediaRecorderHevcStreamer.stop()
+        hevcDirectStreamer.stop()
+        rtspServer.stop()
+        hevcRtspServer.stop()
+        server.stop()
+
+        statusText.text =
+            "NEGOCIANDO 8K PELO CAMERAX…"
+        statusText.setTextColor(
+            ContextCompat.getColor(this, R.color.green)
+        )
+        performanceText.text =
+            "CameraX VideoCapture/Recorder • Quality.HIGHEST"
+        streamButton.text = "Cancelar teste 8K"
+        streamButton.setBackgroundResource(
+            R.drawable.bg_button_danger
+        )
+        streamButton.backgroundTintList = null
+        streamButton.setTextColor(
+            ContextCompat.getColor(
+                this,
+                android.R.color.white
+            )
+        )
+
+        val providerFuture =
+            ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                val option = selectedCameraOption
+                    ?: throw IllegalStateException(
+                        "Câmera selecionada indisponível."
+                    )
+
+                val logicalCameraId =
+                    selectedResolution.overrideLogicalCameraId
+                        ?: option.logicalCameraId
+
+                val selector = CameraSelector.Builder()
+                    .addCameraFilter { cameraInfos ->
+                        cameraInfos.filter { cameraInfo ->
+                            runCatching {
+                                Camera2CameraInfo
+                                    .from(cameraInfo)
+                                    .cameraId ==
+                                    logicalCameraId
+                            }.getOrDefault(false)
+                        }
+                    }
+                    .build()
+
+                previewUseCase = null
+                analysisUseCase = null
+                currentCamera = null
+                updateTorchButton()
+
+                val started = cameraX8kRecorderProbe.start(
+                    cameraProvider = provider,
+                    lifecycleOwner = this,
+                    cameraSelector = selector,
+                    expectedSize = Size(7680, 4320)
+                )
+
+                if (!started) {
+                    updateConnectionStatus(0)
+                }
+            } catch (ex: Exception) {
+                handleCameraX8kFailure(
+                    ex.message ?: ex.javaClass.simpleName
+                )
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
     private fun startStreaming() {
+        if (selectedResolution.directHevc) {
+            startCameraX8kTest()
+            return
+        }
+
         val ip = NetworkUtils.localIpv4()
         if (ip == null) {
             setError("CONECTE O CELULAR A UMA REDE WI-FI")
@@ -2871,6 +3107,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        cameraX8kRecorderProbe.stop()
         refreshAddress()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
@@ -3003,6 +3240,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        cameraX8kRecorderProbe.stop()
         mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()

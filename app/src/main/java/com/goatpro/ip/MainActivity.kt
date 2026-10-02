@@ -310,6 +310,11 @@ class MainActivity : AppCompatActivity() {
                     bitrate: Int
                 ) {
                     backgroundDirectActive = true
+                    runOnUiThread {
+                        actualStreamWidth = width
+                        actualStreamHeight = height
+                        updateStreamInfo()
+                    }
                 }
 
                 override fun onError(message: String) {
@@ -370,13 +375,14 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                         performanceText.text =
-                            "4K frontal Camera1/MediaRecorder • H.264 • " +
+                            "4K frontal GPU • H.264 • " +
                                 fps + " FPS • " +
                                 String.format(
                                     java.util.Locale.US,
                                     "%.1f Mbps",
                                     bitrate / 1_000_000.0
-                                )
+                                ) +
+                                " • " + front4kDirectStreamer.lastSourceDescription
                         updateStreamInfo()
                         refreshAddress()
                     }
@@ -1768,6 +1774,8 @@ class MainActivity : AppCompatActivity() {
         backgroundHeadless = true
 
         val option = selectedCameraOption
+        // RTSP-only background mode now uses camera -> GPU -> encoder. The GPU
+        // performs rotation/crop/scale without NV21/JPEG CPU conversion.
         val useDirectRtsp =
             option != null &&
             rtspServer.activeClientCount() > 0 &&
@@ -1815,7 +1823,17 @@ class MainActivity : AppCompatActivity() {
                     targetHeight = selectedResolution.size.height,
                     targetFps = targetFps,
                     targetBitrate = targetBitrate,
-                    targetZoomRatio = zoom
+                    targetZoomRatio = zoom,
+                    deviceRotationDegrees = if (selectedRotationMode == RotationMode.AUTO) {
+                        surfaceRotationDegrees(autoSurfaceRotation)
+                    } else {
+                        0
+                    },
+                    rotationOffsetDegrees = if (selectedRotationMode == RotationMode.AUTO) {
+                        0
+                    } else {
+                        selectedRotationMode.offsetDegrees
+                    }
                 )
                 backgroundDirectActive = started
                 if (!started) {
@@ -2251,6 +2269,19 @@ class MainActivity : AppCompatActivity() {
 
                 if (selectedRotationMode == RotationMode.AUTO) {
                     applyCameraTargetRotation(rotation)
+                    val degrees = surfaceRotationDegrees(rotation)
+                    if (
+                        backgroundH264Streamer.isRunning() ||
+                        backgroundH264Streamer.isStarting()
+                    ) {
+                        backgroundH264Streamer.updateRotation(degrees, 0)
+                    }
+                    if (
+                        front4kDirectStreamer.isRunning() ||
+                        front4kDirectStreamer.isStarting()
+                    ) {
+                        front4kDirectStreamer.updateRotation(degrees, 0)
+                    }
                     actualStreamWidth = 0
                     actualStreamHeight = 0
                     nextEncodeDueNs = 0L
@@ -2267,6 +2298,13 @@ class MainActivity : AppCompatActivity() {
     private fun applyCameraTargetRotation(rotation: Int) {
         previewUseCase?.targetRotation = rotation
         analysisUseCase?.targetRotation = rotation
+    }
+
+    private fun surfaceRotationDegrees(rotation: Int): Int = when (rotation) {
+        Surface.ROTATION_90 -> 90
+        Surface.ROTATION_180 -> 180
+        Surface.ROTATION_270 -> 270
+        else -> 0
     }
 
     private fun applyRemoteCameraControl(action: String, value: String?) {
@@ -3238,7 +3276,19 @@ class MainActivity : AppCompatActivity() {
                             Front4kDirectStreamer.profileFor(
                                 this,
                                 cameraId
-                            )?.fromOfficialProfile == true
+                            )?.fromOfficialProfile == true,
+                        deviceRotationDegrees =
+                            if (selectedRotationMode == RotationMode.AUTO) {
+                                surfaceRotationDegrees(autoSurfaceRotation)
+                            } else {
+                                0
+                            },
+                        rotationOffsetDegrees =
+                            if (selectedRotationMode == RotationMode.AUTO) {
+                                0
+                            } else {
+                                selectedRotationMode.offsetDegrees
+                            }
                     )
 
                     fallbackResolutionAfterFront4kFailure =
@@ -3517,7 +3567,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (::orientationListener.isInitialized) orientationListener.disable()
+        val keepOrientationTracking =
+            isStreamingActive() &&
+                backgroundStreamingEnabled &&
+                selectedRotationMode == RotationMode.AUTO
+        if (
+            ::orientationListener.isInitialized &&
+            !keepOrientationTracking
+        ) {
+            orientationListener.disable()
+        }
         super.onPause()
     }
 

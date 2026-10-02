@@ -10,7 +10,9 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.RecommendedStreamConfigurationMap
 import android.media.CamcorderProfile
+import android.media.MediaRecorder
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -469,12 +471,17 @@ class MainActivity : AppCompatActivity() {
         val highResolution: Boolean,
         val directHevc: Boolean,
         val overrideLogicalCameraId: String? = null,
-        val overridePhysicalCameraId: String? = null
+        val overridePhysicalCameraId: String? = null,
+        val directFps: Int? = null,
+        val directBitrate: Int? = null
     )
 
     private data class DirectCameraSource(
         val logicalCameraId: String,
-        val physicalCameraId: String?
+        val physicalCameraId: String?,
+        val fps: Int = 24,
+        val bitrate: Int = 45_000_000,
+        val fromRecommendedRecordMap: Boolean = false
     )
 
     private fun resolutionKey(size: Size): String =
@@ -889,9 +896,91 @@ class MainActivity : AppCompatActivity() {
     ): DirectCameraSource? {
         val target = Size(7680, 4320)
 
-        // Prefer the logical camera that Samsung/Android itself associates
-        // with the official 8K camcorder profile. This is more reliable than
-        // forcing the largest physical sensor directly.
+        fun profileFor(logicalId: String): Pair<Int, Int>? {
+            if (Build.VERSION.SDK_INT < 31) return null
+
+            val profiles = runCatching {
+                CamcorderProfile.getAll(
+                    logicalId,
+                    CamcorderProfile.QUALITY_8KUHD
+                )
+            }.getOrNull() ?: return null
+
+            val exactProfiles = profiles.videoProfiles.filter {
+                it.width == target.width &&
+                    it.height == target.height
+            }
+
+            val preferred = exactProfiles.firstOrNull {
+                it.codec == MediaRecorder.VideoEncoder.HEVC
+            } ?: exactProfiles.firstOrNull()
+
+            return preferred?.let {
+                Pair(
+                    it.frameRate.coerceIn(5, 30),
+                    it.bitrate.coerceIn(
+                        8_000_000,
+                        100_000_000
+                    )
+                )
+            }
+        }
+
+        // First choice: the HAL's recommended RECORD map. Android defines
+        // USECASE_RECORD as efficient PRIVATE outputs for supported recording
+        // profiles, so this is the closest public route to the OEM camera app.
+        if (Build.VERSION.SDK_INT >= 29) {
+            for (logicalId in manager.cameraIdList) {
+                val chars = runCatching {
+                    manager.getCameraCharacteristics(logicalId)
+                }.getOrNull() ?: continue
+
+                if (
+                    chars.get(CameraCharacteristics.LENS_FACING) !=
+                        CameraCharacteristics.LENS_FACING_BACK
+                ) {
+                    continue
+                }
+
+                val recordMap = runCatching {
+                    chars.getRecommendedStreamConfigurationMap(
+                        RecommendedStreamConfigurationMap.USECASE_RECORD
+                    )
+                }.getOrNull()
+
+                val privateSizes = runCatching {
+                    recordMap
+                        ?.getOutputSizes(ImageFormat.PRIVATE)
+                        .orEmpty()
+                }.getOrDefault(emptySet())
+
+                val mediaCodecSizes = runCatching {
+                    recordMap
+                        ?.getOutputSizes(
+                            android.media.MediaCodec::class.java
+                        )
+                        .orEmpty()
+                }.getOrDefault(emptySet())
+
+                val exactRecord8k =
+                    (privateSizes + mediaCodecSizes).any {
+                        canonicalLandscapeSize(it) == target
+                    }
+
+                if (exactRecord8k) {
+                    val profile = profileFor(logicalId)
+                    return DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = null,
+                        fps = profile?.first ?: 24,
+                        bitrate = profile?.second ?: 45_000_000,
+                        fromRecommendedRecordMap = true
+                    )
+                }
+            }
+        }
+
+        // Second choice: official 8K camcorder profile on a logical camera.
         if (Build.VERSION.SDK_INT >= 31) {
             for (logicalId in manager.cameraIdList) {
                 val chars = runCatching {
@@ -905,23 +994,14 @@ class MainActivity : AppCompatActivity() {
                     continue
                 }
 
-                val profiles = runCatching {
-                    CamcorderProfile.getAll(
-                        logicalId,
-                        CamcorderProfile.QUALITY_8KUHD
-                    )
-                }.getOrNull()
-
-                val exact8k = profiles?.videoProfiles
-                    ?.firstOrNull {
-                        it.width == target.width &&
-                            it.height == target.height
-                    }
-
-                if (exact8k != null) {
+                val profile = profileFor(logicalId)
+                if (profile != null) {
                     return DirectCameraSource(
                         logicalCameraId = logicalId,
-                        physicalCameraId = null
+                        physicalCameraId = null,
+                        fps = profile.first,
+                        bitrate = profile.second,
+                        fromRecommendedRecordMap = false
                     )
                 }
             }
@@ -1001,51 +1081,59 @@ class MainActivity : AppCompatActivity() {
                         canonicalLandscapeSize(it) == target
                     }
                 ) {
+                    val profile = profileFor(logicalId)
                     return DirectCameraSource(
                         logicalCameraId = logicalId,
-                        physicalCameraId = physicalId
+                        physicalCameraId = physicalId,
+                        fps = profile?.first ?: 24,
+                        bitrate = profile?.second ?: 45_000_000
                     )
                 }
 
-                if (sensorFallback == null) {
-                    val pixel = chars.get(
-                        CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
-                    )
-                    val active = chars.get(
-                        CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
-                    )
-                    val sensorWidth = maxOf(
-                        pixel?.width ?: 0,
-                        active?.width() ?: 0
-                    )
-                    val sensorHeight = maxOf(
-                        pixel?.height ?: 0,
-                        active?.height() ?: 0
-                    )
-                    val landscapeWidth =
-                        maxOf(sensorWidth, sensorHeight)
-                    val landscapeHeight =
-                        minOf(sensorWidth, sensorHeight)
-                    val sensorPixels =
-                        landscapeWidth.toLong() * landscapeHeight.toLong()
+                val pixel = chars.get(
+                    CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
+                )
+                val active = chars.get(
+                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+                )
+                val sensorWidth = maxOf(
+                    pixel?.width ?: 0,
+                    active?.width() ?: 0
+                )
+                val sensorHeight = maxOf(
+                    pixel?.height ?: 0,
+                    active?.height() ?: 0
+                )
+                val landscapeWidth =
+                    maxOf(sensorWidth, sensorHeight)
+                val landscapeHeight =
+                    minOf(sensorWidth, sensorHeight)
+                val sensorPixels =
+                    landscapeWidth.toLong() * landscapeHeight.toLong()
 
-                    if (sensorPixels > largestSensorPixels) {
-                        largestSensorPixels = sensorPixels
-                        largestSensorSource = DirectCameraSource(
-                            logicalCameraId = logicalId,
-                            physicalCameraId = physicalId
-                        )
-                    }
+                if (sensorPixels > largestSensorPixels) {
+                    largestSensorPixels = sensorPixels
+                    val profile = profileFor(logicalId)
+                    largestSensorSource = DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = physicalId,
+                        fps = profile?.first ?: 24,
+                        bitrate = profile?.second ?: 45_000_000
+                    )
+                }
 
-                    if (
-                        landscapeWidth >= target.width &&
-                        landscapeHeight >= target.height
-                    ) {
-                        sensorFallback = DirectCameraSource(
-                            logicalCameraId = logicalId,
-                            physicalCameraId = physicalId
-                        )
-                    }
+                if (
+                    sensorFallback == null &&
+                    landscapeWidth >= target.width &&
+                    landscapeHeight >= target.height
+                ) {
+                    val profile = profileFor(logicalId)
+                    sensorFallback = DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = physicalId,
+                        fps = profile?.first ?: 24,
+                        bitrate = profile?.second ?: 45_000_000
+                    )
                 }
             }
         }
@@ -1054,10 +1142,6 @@ class MainActivity : AppCompatActivity() {
             return sensorFallback
         }
 
-        // Galaxy S21-family devices officially provide native 8K recording,
-        // but some firmware versions do not publish 7680x4320 through every
-        // public Camera2 capability table. For this known family, keep the
-        // experimental exact-8K option visible and try the largest rear sensor.
         val samsungS21Family =
             Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
                 Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
@@ -1157,14 +1241,16 @@ class MainActivity : AppCompatActivity() {
                     combined["7680x4320"] = ResolutionOption(
                         key = "7680x4320",
                         label =
-                            "8K UHD · 7680×4320 · 10 FPS experimental",
+                            "8K UHD · 7680×4320 · RECORD experimental",
                         size = Size(7680, 4320),
                         highResolution = true,
                         directHevc = true,
                         overrideLogicalCameraId =
                             source.logicalCameraId,
                         overridePhysicalCameraId =
-                            source.physicalCameraId
+                            source.physicalCameraId,
+                        directFps = source.fps,
+                        directBitrate = source.bitrate
                     )
                 }
             }
@@ -1247,7 +1333,7 @@ class MainActivity : AppCompatActivity() {
         when {
             option.directHevc -> {
                 streamJpegQuality = 50
-                streamTargetFps = 10
+                streamTargetFps = option.directFps ?: 24
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width >= 3840 -> {
@@ -2712,11 +2798,19 @@ class MainActivity : AppCompatActivity() {
 
                     val size = selectedResolution.size
                     val fps =
-                        if (streamTargetFps > 0) {
-                            streamTargetFps.coerceIn(5, 10)
-                        } else {
-                            10
-                        }
+                        selectedResolution.directFps
+                            ?: if (streamTargetFps > 0) {
+                                streamTargetFps.coerceIn(5, 30)
+                            } else {
+                                24
+                            }
+                    val bitrate =
+                        selectedResolution.directBitrate
+                            ?: HevcDirectStreamer.recommendedBitrate(
+                                size.width,
+                                size.height,
+                                fps
+                            )
 
                     val started = hevcDirectStreamer.start(
                         logicalCameraId = logicalCameraId,
@@ -2724,12 +2818,7 @@ class MainActivity : AppCompatActivity() {
                         width = size.width,
                         height = size.height,
                         fps = fps,
-                        bitrate =
-                            HevcDirectStreamer.recommendedBitrate(
-                                size.width,
-                                size.height,
-                                fps
-                            )
+                        bitrate = bitrate
                     )
 
                     if (!started) {

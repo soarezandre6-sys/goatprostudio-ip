@@ -510,3 +510,14 @@ Branch: `build-13-goat-cam`
 - alterações salvas no GitHub;
 - nenhuma APK foi gerada nesta etapa;
 - próxima validação deve ser feita no Galaxy S21, conferindo: principal, ultra-wide, tele, frontal, 2K e 4K.
+
+### Resoluções dinâmicas — atualização adicional da Build 13
+- removida a lista fixa de 720p / 1080p / 2K / 4K da interface;
+- cada câmera/lente passa a consultar as resoluções YUV 16:9 realmente anunciadas pelo Camera2;
+- resoluções normais e de alta resolução são combinadas e ordenadas automaticamente;
+- o seletor mostra o tamanho real em pixels, por exemplo `Full HD · 1920×1080`, `2K QHD · 2560×1440` e `4K UHD · 3840×2160` quando existirem;
+- a lista é recalculada sempre que o usuário troca entre principal, ultra-wide, tele e frontal;
+- o painel web recebe exatamente a mesma lista dinâmica do aplicativo;
+- aliases antigos HD/FHD/QHD/UHD continuam aceitos nos comandos remotos para compatibilidade;
+- o teto desta versão permanece 4K (3840×2160); resoluções acima disso, como 8K, não são oferecidas ainda;
+- formatos pequenos e formatos fora de 16:9 são ocultados porque não correspondem ao pipeline de vídeo atual do GOAT Cam.

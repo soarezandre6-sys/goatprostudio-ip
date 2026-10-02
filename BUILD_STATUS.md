@@ -648,3 +648,20 @@ Branch: `build-17-goat-cam`
 - APK SHA-256: `750b6c5e188e9245f5a5906e9ab94287a1c5da5b1ee4488d6a7edc80670876a1`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: validar 8K via PRIVATE + USECASE_RECORD + perfil QUALITY_8KUHD, preservando 4K e tele.
+
+
+## Build 18 — 8K via MediaRecorder
+Branch: `build-18-goat-cam`
+
+- criada a partir da Build 17;
+- 4K e tele permanecem sem alteração;
+- o modo 8K deixa de usar como rota principal a sessão Camera2 -> MediaCodec Surface que foi recusada nas Builds 15–17;
+- nova rota experimental: Camera2 lógico -> Surface do MediaRecorder -> HEVC;
+- usa `MediaRecorder.VideoSource.SURFACE`, `MediaRecorder.VideoEncoder.HEVC` e `MediaRecorder.OutputFormat.MPEG_2_TS`;
+- tamanho, FPS e bitrate vêm do perfil 8K selecionado na Build 17 quando disponíveis;
+- mantém `TEMPLATE_RECORD`, `CONTROL_CAPTURE_INTENT_VIDEO_RECORD` e stream use case VIDEO_RECORD;
+- MediaRecorder grava o MPEG-TS em um pipe de memória, sem criar vídeo permanente no armazenamento;
+- leitor TS/PES extrai o elementary stream HEVC Annex-B e envia os access units ao servidor RTSP H.265 existente;
+- detecta NALs HEVC IRAP para marcar keyframes;
+- o fallback automático para a resolução anterior continua ativo se o MediaRecorder/sessão 8K for recusado;
+- nenhuma APK da Build 18 foi gerada nesta etapa.

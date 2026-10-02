@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
@@ -307,6 +308,10 @@ class HevcDirectStreamer(
                             CaptureRequest.CONTROL_AF_MODE,
                             CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
                         )
+                        set(
+                            CaptureRequest.CONTROL_CAPTURE_INTENT,
+                            CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD
+                        )
 
                         val characteristicId =
                             physicalCameraId ?: logicalCameraId
@@ -373,12 +378,37 @@ class HevcDirectStreamer(
             }
         }
 
-        if (
-            physicalCameraId != null &&
-            Build.VERSION.SDK_INT >= 28
-        ) {
+        if (Build.VERSION.SDK_INT >= 28) {
             val output = OutputConfiguration(surface)
-            output.setPhysicalCameraId(physicalCameraId)
+
+            if (physicalCameraId != null) {
+                output.setPhysicalCameraId(physicalCameraId)
+            }
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                runCatching {
+                    val supportedUseCases = manager
+                        .getCameraCharacteristics(logicalCameraId)
+                        .get(
+                            CameraCharacteristics
+                                .SCALER_AVAILABLE_STREAM_USE_CASES
+                        )
+                        .orEmpty()
+
+                    if (
+                        supportedUseCases.contains(
+                            CameraMetadata
+                                .SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD
+                        )
+                    ) {
+                        output.setStreamUseCase(
+                            CameraMetadata
+                                .SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD
+                        )
+                    }
+                }
+            }
+
             val executor = Executor { command ->
                 handler.post(command)
             }

@@ -1578,7 +1578,10 @@ class MainActivity : AppCompatActivity() {
 
         val transportModeChanged =
             option.directHevc != selectedResolution.directHevc
-        val wasStreaming = server.isRunning()
+        val wasStreaming =
+            server.isRunning() ||
+                cameraX8kRecorderProbe.isRunning() ||
+                cameraX8kRecorderProbe.isStarting()
 
         if (
             option.directHevc &&
@@ -3424,6 +3427,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        cameraX8kRecorderProbe.stop()
         mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()

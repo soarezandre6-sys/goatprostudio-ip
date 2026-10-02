@@ -112,3 +112,10 @@ A versão gratuita deve continuar útil de verdade em 1080p. O Pro deve vender g
 
 ## Regra para conversas futuras
 Antes de implementar novos recursos Pro, consultar este arquivo e atualizar o status de cada item conforme ele for implementado e testado. Não considerar um recurso concluído apenas porque foi planejado nesta lista.
+
+
+## Build 24 em implementação
+- 4K frontal: caminho revisto por câmera; removido hardcode da frontal ID 1; Surface persistente + watchdog de 4 s; tentativa também na segunda frontal quando elegível.
+- Presets Pro: nomes claros Preset 1/2/3; salvam câmera, resolução, qualidade, FPS, bitrate, rotação, zoom, EV, ISO/shutter, foco e modos Camera2 quando disponíveis.
+- Segundo plano/tela apagada: foreground service de câmera/microfone, wake lock, Wi-Fi lock e lifecycle CameraX independente da Activity.
+- 8K continua removido.

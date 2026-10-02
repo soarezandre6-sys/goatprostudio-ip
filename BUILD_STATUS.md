@@ -811,3 +811,14 @@ Branch: `build-23-goat-cam`
 - três presets Pro salvos (P1/P2/P3) para câmera, resolução e parâmetros de transmissão;
 - removida do painel web a referência antiga ao 8K experimental;
 - plano Free/Pro registrado em `GOAT_CAM_PRO_PLAN.md`.
+
+
+## Build 24
+Branch: `build-24-goat-cam`
+
+Objetivos:
+- corrigir travamento do 4K frontal e expor tentativa por câmera frontal;
+- refazer Preset 1/2/3 com salvamento real de controles;
+- implementar transmissão em segundo plano/tela apagada com foreground service;
+- preservar traseira 4K, tele, Smart Link, watermark e controles manuais;
+- sem 8K.

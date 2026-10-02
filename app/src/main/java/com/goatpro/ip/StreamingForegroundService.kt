@@ -65,7 +65,6 @@ class StreamingForegroundService : Service() {
 
     override fun onDestroy() {
         releaseLocks()
-        StreamingCameraLifecycle.setActive(false)
         super.onDestroy()
     }
 

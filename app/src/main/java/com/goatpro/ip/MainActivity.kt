@@ -411,6 +411,7 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         setupOrientationTracking()
         restoreSmartLinkState()
+        StreamingCameraLifecycle.setActive(true)
 
         applyPreviewAspectRatio()
         setupCameraLensSelector()
@@ -513,6 +514,9 @@ class MainActivity : AppCompatActivity() {
     private fun saveProPreset(slot: Int) {
         val safeSlot = slot.coerceIn(1, 3)
         val prefix = "preset_${safeSlot}_"
+        val camera = currentCamera
+        val zoom = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
+        val ev = camera?.cameraInfo?.exposureState?.exposureCompensationIndex ?: 0
         proPresetPrefs().edit()
             .putBoolean(prefix + "saved", true)
             .putString(prefix + "camera_key", selectedCameraOption?.key)
@@ -523,10 +527,21 @@ class MainActivity : AppCompatActivity() {
             .putInt(prefix + "bitrate_bps", streamBitrateBps)
             .putBoolean(prefix + "watermark_enabled", watermarkEnabled)
             .putString(prefix + "rotation", selectedRotationMode.name)
+            .putFloat(prefix + "zoom", zoom)
+            .putInt(prefix + "ev", ev)
+            .putBoolean(prefix + "manual_exposure", manualExposureEnabled)
+            .putInt(prefix + "iso", manualIso)
+            .putLong(prefix + "shutter_ns", manualExposureTimeNs)
+            .putLong(prefix + "frame_duration_ns", manualFrameDurationNs)
+            .putBoolean(prefix + "manual_focus", manualFocusEnabled)
+            .putFloat(prefix + "focus_diopters", manualFocusDiopters)
+            .putInt(prefix + "white_balance", selectedWhiteBalanceMode)
+            .putInt(prefix + "antibanding", selectedAntibandingMode)
+            .putInt(prefix + "scene_mode", selectedSceneMode)
             .apply()
         Toast.makeText(
             this,
-            "Preset Pro $safeSlot salvo.",
+            "Preset $safeSlot salvo com câmera e controles.",
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -568,6 +583,17 @@ class MainActivity : AppCompatActivity() {
             prefix + "watermark_enabled",
             true
         )
+        val presetZoom = prefs.getFloat(prefix + "zoom", 1f)
+        val presetEv = prefs.getInt(prefix + "ev", 0)
+        manualExposureEnabled = prefs.getBoolean(prefix + "manual_exposure", false)
+        manualIso = prefs.getInt(prefix + "iso", manualIso)
+        manualExposureTimeNs = prefs.getLong(prefix + "shutter_ns", manualExposureTimeNs)
+        manualFrameDurationNs = prefs.getLong(prefix + "frame_duration_ns", 0L)
+        manualFocusEnabled = prefs.getBoolean(prefix + "manual_focus", false)
+        manualFocusDiopters = prefs.getFloat(prefix + "focus_diopters", 0f)
+        selectedWhiteBalanceMode = prefs.getInt(prefix + "white_balance", selectedWhiteBalanceMode)
+        selectedAntibandingMode = prefs.getInt(prefix + "antibanding", selectedAntibandingMode)
+        selectedSceneMode = prefs.getInt(prefix + "scene_mode", selectedSceneMode)
         selectedRotationMode = runCatching {
             RotationMode.valueOf(
                 prefs.getString(
@@ -608,12 +634,39 @@ class MainActivity : AppCompatActivity() {
             h264Encoder.stop()
             updateStreamInfo()
             saveSmartLinkState()
+
+            previewView.postDelayed({
+                val camera = currentCamera
+                if (camera != null) {
+                    camera.cameraInfo.zoomState.value?.let { state ->
+                        runCatching {
+                            camera.cameraControl.setZoomRatio(
+                                presetZoom.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+                            )
+                        }
+                    }
+                    if (!manualExposureEnabled) {
+                        val state = camera.cameraInfo.exposureState
+                        val range = state.exposureCompensationRange
+                        runCatching {
+                            camera.cameraControl.setExposureCompensationIndex(
+                                presetEv.coerceIn(range.lower, range.upper)
+                            )
+                        }
+                    }
+                    applyAutomaticSensorControls()
+                    applyLensControls()
+                    if (manualFocusEnabled) applyManualFocus()
+                    if (manualExposureEnabled) applyManualExposure()
+                }
+            }, 450L)
+
             Toast.makeText(
                 this,
-                "Preset Pro $safeSlot carregado.",
+                "Preset $safeSlot carregado e aplicado.",
                 Toast.LENGTH_SHORT
             ).show()
-        }, 350L)
+        }, 450L)
     }
 
     private fun openGoatProStudioWebsite() {
@@ -1537,7 +1590,7 @@ class MainActivity : AppCompatActivity() {
                     analysisUseCase = null
                     previewUseCase = preview
                     currentCamera =
-                        provider.bindToLifecycle(this, selector, preview)
+                        provider.bindToLifecycle(StreamingCameraLifecycle, selector, preview)
                     torchEnabled = false
                     updateTorchButton()
                     if (!server.isRunning()) setReadyState()
@@ -1732,7 +1785,7 @@ class MainActivity : AppCompatActivity() {
                 provider.unbindAll()
                 previewUseCase = preview
                 analysisUseCase = analysis
-                currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
+                currentCamera = provider.bindToLifecycle(StreamingCameraLifecycle, selector, preview, analysis)
                 runCatching {
                     currentCamera?.cameraControl?.setZoomRatio(
                         cameraOption?.zoomRatio ?: 1f
@@ -2579,6 +2632,10 @@ class MainActivity : AppCompatActivity() {
                 availableResolutionOptions.joinToString(";") {
                     it.key + "|" + it.label.replace(";", " ").replace("|", " ")
                 }
+            val presetPrefs = proPresetPrefs()
+            val preset1Saved = presetPrefs.getBoolean("preset_1_saved", false)
+            val preset2Saved = presetPrefs.getBoolean("preset_2_saved", false)
+            val preset3Saved = presetPrefs.getBoolean("preset_3_saved", false)
 
             "{\"available\":true" +
                 ",\"resolution\":\"${selectedResolution.key}\"" +
@@ -2591,6 +2648,10 @@ class MainActivity : AppCompatActivity() {
                 ",\"bitrateKbps\":${streamBitrateBps / 1000}" +
                 ",\"watermarkEnabled\":$watermarkEnabled" +
                 ",\"smartLinkEnabled\":true" +
+                ",\"preset1Saved\":$preset1Saved" +
+                ",\"preset2Saved\":$preset2Saved" +
+                ",\"preset3Saved\":$preset3Saved" +
+                ",\"backgroundStreaming\":${isStreamingActive()}" +
                 ",\"rotation\":\"${selectedRotationMode.name}\"" +
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
@@ -2687,6 +2748,22 @@ class MainActivity : AppCompatActivity() {
         audioButton.text = if (audioEnabled) "Áudio: ativado" else "Áudio: desligado"
     }
 
+    private fun isStreamingActive(): Boolean =
+        server.isRunning() ||
+            rtspServer.isRunning() ||
+            front4kDirectStreamer.isRunning() ||
+            front4kDirectStreamer.isStarting()
+
+    private fun startStreamingForegroundService() {
+        StreamingCameraLifecycle.setActive(true)
+        val intent = Intent(this, StreamingForegroundService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun stopStreamingForegroundService() {
+        stopService(Intent(this, StreamingForegroundService::class.java))
+    }
+
     private fun startStreaming() {
         val ip = NetworkUtils.localIpv4()
         if (ip == null) {
@@ -2699,6 +2776,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        startStreamingForegroundService()
         front4kDirectStreamer.stop()
         refreshAddress()
         nextEncodeDueNs = 0L
@@ -2810,6 +2888,8 @@ class MainActivity : AppCompatActivity() {
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()
+        stopStreamingForegroundService()
+        StreamingCameraLifecycle.setActive(true)
         nextEncodeDueNs = 0L
         resetPerformanceStats()
         actualStreamWidth = 0
@@ -2958,8 +3038,14 @@ class MainActivity : AppCompatActivity() {
         ).show()
     }
 
+    override fun onStart() {
+        super.onStart()
+        StreamingCameraLifecycle.setActive(true)
+    }
+
     override fun onResume() {
         super.onResume()
+        StreamingCameraLifecycle.setActive(true)
         if (::orientationListener.isInitialized && orientationListener.canDetectOrientation()) {
             orientationListener.enable()
         }
@@ -2969,6 +3055,15 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         if (::orientationListener.isInitialized) orientationListener.disable()
         super.onPause()
+    }
+
+    override fun onStop() {
+        // If a stream is active, the foreground service keeps CameraX/Camera2 alive.
+        // Otherwise release the independent camera lifecycle while the app is hidden.
+        if (!isStreamingActive()) {
+            StreamingCameraLifecycle.setActive(false)
+        }
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -2983,6 +3078,8 @@ class MainActivity : AppCompatActivity() {
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()
+        stopStreamingForegroundService()
+        StreamingCameraLifecycle.setActive(false)
         cameraExecutor.shutdown()
         super.onDestroy()
     }

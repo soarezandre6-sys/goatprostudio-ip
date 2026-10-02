@@ -312,17 +312,21 @@ class MjpegServer(
                     <div class="muted" style="color:#F2B620;font-weight:bold;margin-top:16px;margin-bottom:6px">RECURSOS PRO EM TESTE</div>
                     <label><input id="watermarkEnabled" type="checkbox" onchange="cmd('watermark',this.checked?'1':'0')"> Marca d'água GOAT CAM FREE</label>
                     <div class="rangeLimits">No produto final, a versão Free mantém a marca; o Pro remove.</div>
+                    <div class="rangeLimits" style="margin-top:8px">Presets guardam câmera, resolução e controles manuais para reutilizar depois.</div>
                     <div class="row" style="margin-top:8px">
-                      <button onclick="cmd('savePreset','1')">Salvar P1</button>
-                      <button onclick="cmd('savePreset','2')">Salvar P2</button>
-                      <button onclick="cmd('savePreset','3')">Salvar P3</button>
+                      <button onclick="presetCmd('savePreset','1','Preset 1 salvo')">Salvar Preset 1</button>
+                      <button class="secondary" onclick="presetCmd('loadPreset','1','Preset 1 aplicado')">Aplicar Preset 1</button>
                     </div>
                     <div class="row">
-                      <button class="secondary" onclick="cmd('loadPreset','1')">Carregar P1</button>
-                      <button class="secondary" onclick="cmd('loadPreset','2')">Carregar P2</button>
-                      <button class="secondary" onclick="cmd('loadPreset','3')">Carregar P3</button>
+                      <button onclick="presetCmd('savePreset','2','Preset 2 salvo')">Salvar Preset 2</button>
+                      <button class="secondary" onclick="presetCmd('loadPreset','2','Preset 2 aplicado')">Aplicar Preset 2</button>
                     </div>
-                    <div class="rangeLimits">Smart Link lembra automaticamente câmera, resolução, qualidade, FPS, bitrate, rotação e marca d'água.</div>
+                    <div class="row">
+                      <button onclick="presetCmd('savePreset','3','Preset 3 salvo')">Salvar Preset 3</button>
+                      <button class="secondary" onclick="presetCmd('loadPreset','3','Preset 3 aplicado')">Aplicar Preset 3</button>
+                    </div>
+                    <div class="rangeLimits" id="presetState">Nenhum preset confirmado ainda.</div>
+                    <div class="rangeLimits">Smart Link lembra automaticamente a última configuração mesmo sem usar preset.</div>
 
                     <label>Rotação da imagem</label>
                     <select id="rotation" onchange="cmd('rotation',this.value)">
@@ -589,6 +593,12 @@ class MjpegServer(
                   await cmd('shutterUs',String(us));
                 }
 
+                async function presetCmd(action,slot,message){
+                  document.getElementById('status').textContent=message+'…';
+                  await cmd(action,slot);
+                  setTimeout(loadState,650);
+                }
+
                 async function cmd(action,value){
                   try{
                     const q='/camera/control?action='+encodeURIComponent(action)+(value===undefined?'':'&value='+encodeURIComponent(value));
@@ -626,6 +636,12 @@ class MjpegServer(
                     document.getElementById('bitrateText').textContent=
                       Number(s.bitrateKbps||0)<=0?'Automático':(Number(s.bitrateKbps)/1000).toFixed(1)+' Mbps';
                     document.getElementById('watermarkEnabled').checked=!!s.watermarkEnabled;
+                    const saved=[];
+                    if(s.preset1Saved)saved.push('Preset 1');
+                    if(s.preset2Saved)saved.push('Preset 2');
+                    if(s.preset3Saved)saved.push('Preset 3');
+                    document.getElementById('presetState').textContent=
+                      saved.length ? ('Salvos: '+saved.join(' · ')) : 'Nenhum preset salvo ainda.';
                     document.getElementById('rotation').value=s.rotation||'AUTO';
                     document.getElementById('autoDiscovery').checked=!!s.autoDiscovery;
                     document.getElementById('audioEnabled').checked=!!s.audioEnabled;

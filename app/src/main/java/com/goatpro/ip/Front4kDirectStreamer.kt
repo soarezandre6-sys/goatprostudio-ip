@@ -73,6 +73,8 @@ class Front4kDirectStreamer(
     private var configuredHeight = 2160
     private var configuredFps = 30
     private var configuredBitrate = 32_000_000
+    @Volatile private var sessionConfigured = false
+    @Volatile private var firstFrameDelivered = false
 
     fun isRunning(): Boolean = running.get()
     fun isStarting(): Boolean = starting.get()
@@ -135,13 +137,17 @@ class Front4kDirectStreamer(
                     }
                 }
 
+                // Samsung recording pipelines are more reliable with a persistent
+                // encoder input Surface, which behaves closer to the recorder path used
+                // by the stock camera than a transient createInputSurface().
+                val surface = MediaCodec.createPersistentInputSurface()
                 encoder.configure(
                     format,
                     null,
                     null,
                     MediaCodec.CONFIGURE_FLAG_ENCODE
                 )
-                val surface = encoder.createInputSurface()
+                encoder.setInputSurface(surface)
                 encoder.start()
 
                 val thread = HandlerThread("goat-front-4k-camera").apply {
@@ -157,6 +163,8 @@ class Front4kDirectStreamer(
                 configuredHeight = profile.height
                 configuredFps = safeFps
                 configuredBitrate = safeBitrate
+                sessionConfigured = false
+                firstFrameDelivered = false
                 starting.set(true)
 
                 startDrainThread(encoder)
@@ -292,14 +300,19 @@ class Front4kDirectStreamer(
                     }
 
                     session.setRepeatingRequest(request.build(), null, handler)
+                    sessionConfigured = true
                     starting.set(false)
                     running.set(true)
-                    listener.onStarted(
-                        configuredWidth,
-                        configuredHeight,
-                        configuredFps,
-                        configuredBitrate
-                    )
+
+                    // A session can be accepted by Samsung yet deliver zero encoder
+                    // frames. Treat that as failure instead of leaving GOAT Cam frozen.
+                    handler.postDelayed({
+                        if (running.get() && sessionConfigured && !firstFrameDelivered) {
+                            fail(
+                                "Sessão 4K frontal abriu, mas não entregou frames em 4 segundos."
+                            )
+                        }
+                    }, 4_000L)
                 } catch (ex: Exception) {
                     fail(
                         "Falha ao iniciar captura 4K frontal: " +
@@ -382,6 +395,15 @@ class Front4kDirectStreamer(
                                 output.limit(info.offset + info.size)
                                 val bytes = ByteArray(info.size)
                                 output.get(bytes)
+                                if (!firstFrameDelivered && sessionConfigured) {
+                                    firstFrameDelivered = true
+                                    listener.onStarted(
+                                        configuredWidth,
+                                        configuredHeight,
+                                        configuredFps,
+                                        configuredBitrate
+                                    )
+                                }
                                 listener.onAccessUnit(
                                     bytes,
                                     info.presentationTimeUs,
@@ -420,6 +442,8 @@ class Front4kDirectStreamer(
     private fun stopLocked() {
         running.set(false)
         starting.set(false)
+        sessionConfigured = false
+        firstFrameDelivered = false
 
         runCatching { captureSession?.stopRepeating() }
         runCatching { captureSession?.abortCaptures() }
@@ -522,10 +546,36 @@ class Front4kDirectStreamer(
                 }
             }
 
-            // Samsung S21-family fallback: the stock camera can expose UHD
-            // through its recording path even when Camera2 omits 3840x2160
-            // from the public YUV list. Keep this fallback scoped to the S21
-            // family and only to a front camera with a large enough sensor.
+            // Probe the public recording/private Surface maps per front camera.
+            // This avoids the old hardcode that exposed 4K only on camera ID 1.
+            val map = chars.get(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+            )
+            fun hasExact4k(sizes: Array<android.util.Size>?): Boolean =
+                sizes.orEmpty().any {
+                    (it.width == 3840 && it.height == 2160) ||
+                        (it.width == 2160 && it.height == 3840)
+                }
+
+            val recorder4k = runCatching {
+                hasExact4k(map?.getOutputSizes(MediaRecorder::class.java))
+            }.getOrDefault(false)
+            val codec4k = runCatching {
+                hasExact4k(map?.getOutputSizes(MediaCodec::class.java))
+            }.getOrDefault(false)
+            if (recorder4k || codec4k) {
+                return Profile(
+                    cameraId = cameraId,
+                    fps = 30,
+                    bitrate = 32_000_000,
+                    fromOfficialProfile = false
+                )
+            }
+
+            // Some Galaxy S21 firmware hides UHD front recording from the public
+            // size maps although the stock app offers it. Permit an experimental
+            // attempt on every real front camera with a sufficiently large sensor;
+            // the 4-second watchdog prevents an unsupported path from hanging.
             val samsungS21 =
                 Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
                     Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
@@ -539,10 +589,10 @@ class Front4kDirectStreamer(
             val sensorWidth = maxOf(pixel?.width ?: 0, active?.width() ?: 0)
             val sensorHeight = maxOf(pixel?.height ?: 0, active?.height() ?: 0)
             val enoughPixels =
-                maxOf(sensorWidth, sensorHeight) >= 3200 &&
+                maxOf(sensorWidth, sensorHeight) >= 3000 &&
                     minOf(sensorWidth, sensorHeight) >= 2000
 
-            return if (samsungS21 && enoughPixels && cameraId == "1") {
+            return if (samsungS21 && enoughPixels) {
                 Profile(
                     cameraId = cameraId,
                     fps = 30,

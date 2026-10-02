@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 
@@ -16,6 +20,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.GoatProIP"
         android:usesCleartextTraffic="true">
+
+        <service
+            android:name=".StreamingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -473,7 +473,7 @@ class GpuCameraH264Streamer(
                         )
                         val afModes = characteristics.get(
                             CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
-                        ).orEmpty()
+                        ) ?: intArrayOf()
                         if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
                             set(
                                 CaptureRequest.CONTROL_AF_MODE,
@@ -968,7 +968,7 @@ class GpuCameraH264Streamer(
         }
 
         private fun chooseFpsRange(
-            ranges: Array<Range<Int>>,
+            ranges: Array<out Range<Int>>,
             fps: Int
         ): Range<Int>? =
             ranges

@@ -62,7 +62,7 @@ class HevcDirectStreamer(
     fun isRunning(): Boolean = running.get()
     fun isStarting(): Boolean = starting.get()
 
-    fun supports(width: Int, height: Int, fps: Int = 24): Boolean {
+    fun supports(width: Int, height: Int, fps: Int = 10): Boolean {
         return try {
             val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
             try {
@@ -93,13 +93,13 @@ class HevcDirectStreamer(
         physicalCameraId: String?,
         width: Int,
         height: Int,
-        fps: Int = 24,
+        fps: Int = 10,
         bitrate: Int = recommendedBitrate(width, height, fps)
     ): Boolean {
         synchronized(lock) {
             if (running.get() || starting.get()) return true
 
-            val safeFps = fps.coerceIn(5, 30)
+            val safeFps = fps.coerceIn(5, 15)
             val safeBitrate = bitrate.coerceIn(8_000_000, 80_000_000)
 
             return try {
@@ -108,15 +108,12 @@ class HevcDirectStreamer(
                 val caps = encoder.codecInfo
                     .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_HEVC)
 
-                if (!caps.videoCapabilities.isSizeSupported(width, height)) {
-                    encoder.release()
-                    listener.onError(
-                        "Encoder HEVC não aceita " +
-                            width + "x" + height + " neste aparelho."
-                    )
-                    return false
-                }
-
+                // Do not reject experimental 8K only because codec
+                // capabilities under-report the size. Some OEM stacks expose
+                // first-party modes incompletely through public capability
+                // tables. Configure the exact requested size and let the
+                // codec/camera session accept or reject the real 7680x4320
+                // path.
                 val bitrateMode =
                     if (
                         caps.encoderCapabilities.isBitrateModeSupported(

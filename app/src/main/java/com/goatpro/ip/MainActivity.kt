@@ -1079,7 +1079,7 @@ class MainActivity : AppCompatActivity() {
         when {
             option.directFront4k -> {
                 streamJpegQuality = 50
-                streamTargetFps = option.directFps ?: 24
+                streamTargetFps = option.directFps ?: 30
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width >= 3840 -> {
@@ -2593,6 +2593,7 @@ class MainActivity : AppCompatActivity() {
 
         if (
             selectedResolution.directFront4k &&
+            !autoRestartStreamAfterCameraBind &&
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA
@@ -2604,9 +2605,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateConnectionStatus(count: Int) {
         if (!::connectionStatusText.isInitialized) return
-        val rtspCount = rtspServer.activeClientCount() else {
-                rtspServer.activeClientCount()
-            }
+        val rtspCount = rtspServer.activeClientCount()
         val totalCount = count + rtspCount
         when {
             totalCount > 0 -> {
@@ -2646,8 +2645,7 @@ class MainActivity : AppCompatActivity() {
                     ip + ":8554/h264"
             } else {
                 "MJPEG: http://" + ip +
-                    ":8080/video
-H.264 RTSP: rtsp://" +
+                    ":8080/video\nH.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
             }
         } else {
@@ -2708,8 +2706,7 @@ H.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
             } else {
                 "MJPEG: http://" + ip +
-                    ":8080/video
-H.264 RTSP: rtsp://" +
+                    ":8080/video\nH.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
             }
 

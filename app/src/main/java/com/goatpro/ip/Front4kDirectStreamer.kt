@@ -246,7 +246,7 @@ class Front4kDirectStreamer(
                     val chars = manager.getCameraCharacteristics(cameraId)
                     val afModes = chars.get(
                         CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
-                    ).orEmpty()
+                    ) ?: intArrayOf()
 
                     val request = camera.createCaptureRequest(
                         CameraDevice.TEMPLATE_RECORD
@@ -542,7 +542,7 @@ class Front4kDirectStreamer(
                 maxOf(sensorWidth, sensorHeight) >= 3200 &&
                     minOf(sensorWidth, sensorHeight) >= 2000
 
-            return if (samsungS21 && enoughPixels) {
+            return if (samsungS21 && enoughPixels && cameraId == "1") {
                 Profile(
                     cameraId = cameraId,
                     fps = 30,

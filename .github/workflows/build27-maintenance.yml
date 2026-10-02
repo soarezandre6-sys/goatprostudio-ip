@@ -1,0 +1,31 @@
+name: Build 27 Maintenance
+
+on:
+  push:
+    branches: [ build-27-goat-cam ]
+    paths:
+      - ".github/build-27-maintenance.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Build 27 integration
+        run: python tools/build27_integrate.py
+      - name: Validate and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt \
+                  app/src/main/java/com/goatpro/ip/MjpegServer.kt \
+                  app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt \
+                  app/src/main/java/com/goatpro/ip/H264Encoder.kt \
+                  app/src/main/java/com/goatpro/ip/BackgroundH264Streamer.kt \
+                  BUILD_27_STATUS.md
+          git diff --cached --check
+          git commit -m "Build 27: integrar 4K frontal 60 FPS e high-speed 120"
+          git push

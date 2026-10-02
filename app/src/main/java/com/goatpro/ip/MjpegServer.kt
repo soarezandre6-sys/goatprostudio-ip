@@ -484,7 +484,7 @@ class MjpegServer(
                   if(current) select.value=current;
                   document.getElementById('resolutionSupport').textContent=
                     rows.length
-                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · 8K aparece somente quando câmera + encoder HEVC suportarem'
+                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · 8K experimental tenta 7680×4320 exatos em aparelhos compatíveis'
                       : 'Não foi possível ler as resoluções da câmera';
                 }
 

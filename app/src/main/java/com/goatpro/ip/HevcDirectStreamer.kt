@@ -62,7 +62,7 @@ class HevcDirectStreamer(
     fun isRunning(): Boolean = running.get()
     fun isStarting(): Boolean = starting.get()
 
-    fun supports(width: Int, height: Int, fps: Int = 24): Boolean {
+    fun supports(width: Int, height: Int, fps: Int = 10): Boolean {
         return try {
             val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
             try {

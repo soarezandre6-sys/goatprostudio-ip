@@ -1422,10 +1422,15 @@ class MainActivity : AppCompatActivity() {
                 Surface.ROTATION_0
             }
 
-            if (selectedResolution.directHevc) {
+            if (
+                selectedResolution.directHevc ||
+                selectedResolution.directH264
+            ) {
                 if (
                     hevcDirectStreamer.isRunning() ||
-                    hevcDirectStreamer.isStarting()
+                    hevcDirectStreamer.isStarting() ||
+                    h264DirectStreamer.isRunning() ||
+                    h264DirectStreamer.isStarting()
                 ) {
                     return@addListener
                 }
@@ -1480,7 +1485,7 @@ class MainActivity : AppCompatActivity() {
                     analysisUseCase = null
                     currentCamera = null
                     updateTorchButton()
-                    setError("ERRO AO ABRIR PREVIEW 8K")
+                    setError("ERRO AO ABRIR PREVIEW 4K/8K")
                 }
                 return@addListener
             }
@@ -2589,83 +2594,170 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
-        if (selectedResolution.directHevc) {
-            h264Encoder.stop()
-            rtspServer.stop()
-            hevcRtspServer.start()
+        when {
+            selectedResolution.directHevc -> {
+                h264Encoder.stop()
+                h264DirectStreamer.stop()
+                rtspServer.stop()
+                hevcRtspServer.start()
 
-            statusText.text =
-                "INICIANDO 8K HEVC POR HARDWARE…"
-            statusText.setTextColor(
-                ContextCompat.getColor(this, R.color.green)
-            )
+                statusText.text =
+                    "INICIANDO 8K HEVC • 10 FPS…"
+                statusText.setTextColor(
+                    ContextCompat.getColor(this, R.color.green)
+                )
 
-            val providerFuture =
-                ProcessCameraProvider.getInstance(this)
-            providerFuture.addListener({
-                try {
-                    val provider = providerFuture.get()
-                    provider.unbindAll()
-                    previewUseCase = null
-                    analysisUseCase = null
-                    currentCamera = null
-                    updateTorchButton()
+                val providerFuture =
+                    ProcessCameraProvider.getInstance(this)
+                providerFuture.addListener({
+                    try {
+                        val provider = providerFuture.get()
+                        provider.unbindAll()
+                        previewUseCase = null
+                        analysisUseCase = null
+                        currentCamera = null
+                        updateTorchButton()
 
-                    val option = selectedCameraOption
-                    if (option == null) {
-                        throw IllegalStateException(
-                            "Câmera selecionada indisponível."
-                        )
-                    }
-
-                    val size = selectedResolution.size
-                    val fps =
-                        if (streamTargetFps > 0) {
-                            streamTargetFps.coerceIn(5, 30)
-                        } else {
-                            24
-                        }
-
-                    val started = hevcDirectStreamer.start(
-                        logicalCameraId = option.logicalCameraId,
-                        physicalCameraId = option.physicalCameraId,
-                        width = size.width,
-                        height = size.height,
-                        fps = fps,
-                        bitrate =
-                            HevcDirectStreamer.recommendedBitrate(
-                                size.width,
-                                size.height,
-                                fps
+                        val option = selectedCameraOption
+                            ?: throw IllegalStateException(
+                                "Câmera selecionada indisponível."
                             )
-                    )
 
-                    if (!started) {
+                        val logicalCameraId =
+                            selectedResolution.overrideLogicalCameraId
+                                ?: option.logicalCameraId
+                        val physicalCameraId =
+                            selectedResolution.overridePhysicalCameraId
+                                ?: if (
+                                    logicalCameraId ==
+                                        option.logicalCameraId
+                                ) {
+                                    option.physicalCameraId
+                                } else {
+                                    null
+                                }
+
+                        val size = selectedResolution.size
+                        val fps =
+                            if (streamTargetFps > 0) {
+                                streamTargetFps.coerceIn(5, 15)
+                            } else {
+                                10
+                            }
+
+                        val started = hevcDirectStreamer.start(
+                            logicalCameraId = logicalCameraId,
+                            physicalCameraId = physicalCameraId,
+                            width = size.width,
+                            height = size.height,
+                            fps = fps,
+                            bitrate =
+                                HevcDirectStreamer.recommendedBitrate(
+                                    size.width,
+                                    size.height,
+                                    fps
+                                )
+                        )
+
+                        if (!started) {
+                            hevcRtspServer.stop()
+                            server.stop()
+                        }
+                    } catch (ex: Exception) {
                         hevcRtspServer.stop()
                         server.stop()
+                        setError(
+                            "8K HEVC: " +
+                                (
+                                    ex.message
+                                        ?: "falha ao abrir a câmera 8K"
+                                    )
+                        )
+                        startCamera()
                     }
-                } catch (ex: Exception) {
-                    hevcRtspServer.stop()
-                    server.stop()
-                    setError(
-                        "8K HEVC: " +
-                            (
-                                ex.message
-                                    ?: "falha ao abrir a câmera"
+                }, ContextCompat.getMainExecutor(this))
+            }
+
+            selectedResolution.directH264 -> {
+                h264Encoder.stop()
+                hevcDirectStreamer.stop()
+                hevcRtspServer.stop()
+                rtspServer.start()
+
+                statusText.text =
+                    "INICIANDO 4K H.264 POR HARDWARE…"
+                statusText.setTextColor(
+                    ContextCompat.getColor(this, R.color.green)
+                )
+
+                val providerFuture =
+                    ProcessCameraProvider.getInstance(this)
+                providerFuture.addListener({
+                    try {
+                        val provider = providerFuture.get()
+                        provider.unbindAll()
+                        previewUseCase = null
+                        analysisUseCase = null
+                        currentCamera = null
+                        updateTorchButton()
+
+                        val option = selectedCameraOption
+                            ?: throw IllegalStateException(
+                                "Câmera selecionada indisponível."
+                            )
+
+                        val size = selectedResolution.size
+                        val fps =
+                            if (streamTargetFps > 0) {
+                                streamTargetFps.coerceIn(5, 30)
+                            } else {
+                                10
+                            }
+
+                        val started = h264DirectStreamer.start(
+                            logicalCameraId = option.logicalCameraId,
+                            physicalCameraId = option.physicalCameraId,
+                            width = size.width,
+                            height = size.height,
+                            fps = fps,
+                            bitrate =
+                                H264DirectStreamer.recommendedBitrate(
+                                    size.width,
+                                    size.height,
+                                    fps
                                 )
-                    )
-                    startCamera()
-                }
-            }, ContextCompat.getMainExecutor(this))
-        } else {
-            hevcDirectStreamer.stop()
-            hevcRtspServer.stop()
-            rtspServer.start()
-            statusText.text =
-                "TRANSMITINDO PARA O GOAT PRO STUDIO"
-            statusText.setTextColor(
-                ContextCompat.getColor(this, R.color.green)
-            )
+                        )
+
+                        if (!started) {
+                            rtspServer.stop()
+                            server.stop()
+                        }
+                    } catch (ex: Exception) {
+                        rtspServer.stop()
+                        server.stop()
+                        setError(
+                            "4K H.264: " +
+                                (
+                                    ex.message
+                                        ?: "falha ao abrir a câmera 4K"
+                                    )
+                        )
+                        startCamera()
+                    }
+                }, ContextCompat.getMainExecutor(this))
+            }
+
+            else -> {
+                h264DirectStreamer.stop()
+                hevcDirectStreamer.stop()
+                hevcRtspServer.stop()
+                rtspServer.start()
+                statusText.text =
+                    "TRANSMITINDO PARA O GOAT PRO STUDIO"
+                statusText.setTextColor(
+                    ContextCompat.getColor(this, R.color.green)
+                )
+            }
         }
 
         updateConnectionStatus(0)
@@ -2686,6 +2778,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        h264DirectStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()
         hevcRtspServer.stop()
@@ -2706,7 +2799,10 @@ class MainActivity : AppCompatActivity() {
         )
 
         if (
-            selectedResolution.directHevc &&
+            (
+                selectedResolution.directHevc ||
+                    selectedResolution.directH264
+                ) &&
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA
@@ -2758,13 +2854,17 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAddress() {
         val ip = NetworkUtils.localIpv4()
         addressText.text = if (ip != null) {
-            if (selectedResolution.directHevc) {
-                "8K HEVC/H.265 RTSP: rtsp://" +
-                    ip + ":8554/h265"
-            } else {
-                "MJPEG: http://" + ip +
-                    ":8080/video\nH.264 RTSP: rtsp://" +
-                    ip + ":8554/h264"
+            when {
+                selectedResolution.directHevc ->
+                    "8K HEVC/H.265 RTSP: rtsp://" +
+                        ip + ":8554/h265"
+                selectedResolution.directH264 ->
+                    "4K H.264 RTSP: rtsp://" +
+                        ip + ":8554/h264"
+                else ->
+                    "MJPEG: http://" + ip +
+                        ":8080/video\nH.264 RTSP: rtsp://" +
+                        ip + ":8554/h264"
             }
         } else {
             "Sem endereço Wi-Fi disponível"
@@ -2793,6 +2893,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (selectedResolution.directH264) {
+            streamInfoText.text =
+                dimensions + " • " + fpsLabel +
+                    " • H.264 hardware direto • qualidade alta"
+            return
+        }
+
         val profile = selectedQualityProfile
         val profileLabel =
             if (profile == QualityProfile.CUSTOM) {
@@ -2818,15 +2925,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val urls =
-            if (selectedResolution.directHevc) {
+        val urls = when {
+            selectedResolution.directHevc ->
                 "8K HEVC/H.265 RTSP: rtsp://" +
                     ip + ":8554/h265"
-            } else {
+            selectedResolution.directH264 ->
+                "4K H.264 RTSP: rtsp://" +
+                    ip + ":8554/h264"
+            else ->
                 "MJPEG: http://" + ip +
                     ":8080/video\nH.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
-            }
+        }
 
         val clipboard =
             getSystemService(
@@ -2837,10 +2947,13 @@ class MainActivity : AppCompatActivity() {
         )
         Toast.makeText(
             this,
-            if (selectedResolution.directHevc) {
-                "Endereço 8K HEVC copiado"
-            } else {
-                "Endereços MJPEG e H.264 copiados"
+            when {
+                selectedResolution.directHevc ->
+                    "Endereço 8K HEVC copiado"
+                selectedResolution.directH264 ->
+                    "Endereço 4K H.264 copiado"
+                else ->
+                    "Endereços MJPEG e H.264 copiados"
             },
             Toast.LENGTH_SHORT
         ).show()
@@ -2868,6 +2981,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        h264DirectStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()
         hevcRtspServer.stop()

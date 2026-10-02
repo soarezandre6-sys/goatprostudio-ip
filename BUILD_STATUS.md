@@ -599,3 +599,20 @@ Branch: `build-16-goat-cam`
 - ao trocar de um stream funcionando para 8K, o app guarda a resolução anterior;
 - se a câmera recusar 8K, o app restaura automaticamente a resolução anterior e reinicia a transmissão, evitando deixar o PC congelado sem stream;
 - nenhuma APK da Build 16 foi gerada nesta etapa.
+
+
+### APK de teste — Build 16
+- workflow: Android Debug APK;
+- primeira execução #26 encontrou erro de compilação nos tipos de stream use case e foi corrigida;
+- execução final: 37054131574 (#27);
+- conclusão: success;
+- branch: `build-16-goat-cam`;
+- head commit da execução: `cf0cfc5179a100a6681450624b5fa856976a1e30`;
+- artifact: `goat-cam-build-16-debug`;
+- artifact id: 11248055798;
+- artifact digest: `sha256:1213ec866ac668b554c86bd6f56d56b1f71149d6739642b3705bf84fd999c507`;
+- APK: `GOAT-Cam-Build-16-Teste.apk`;
+- tamanho do APK: 4.850.280 bytes;
+- APK SHA-256: `95da8b77c1550b86b88fe656d037639e5e571dac737930b10e3b0db01e49bc2a`;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: validar sessão 8K pelo perfil lógico 8KUHD/VIDEO_RECORD e fallback automático para a resolução anterior se o 8K for recusado.

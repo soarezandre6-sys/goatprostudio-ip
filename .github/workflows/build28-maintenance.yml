@@ -1,0 +1,26 @@
+name: Build 28 Maintenance
+
+on:
+  push:
+    branches: [ build-28-goat-cam ]
+    paths:
+      - ".github/build-28-maintenance.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Build 28 MainActivity integration
+        run: python tools/build28_mainactivity_patch.py
+      - name: Validate and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt
+          git diff --cached --check
+          git commit -m "Build 28: integrar 4K GPU e rotação em segundo plano"
+          git push

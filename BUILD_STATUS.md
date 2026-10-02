@@ -549,5 +549,6 @@ Branch: `build-13-goat-cam`
 - artifact digest: `sha256:07037369da805d06a7ee432053ca36dede429de27e022a4d8f09d083107a036a`;
 - APK gerado: `app-debug.apk`;
 - tamanho do APK: 4.850.280 bytes;
+- APK SHA-256: `ced82fbe9d86fd6af62f3f8b9eaa428a790ebaafcecdc7676438c83faf149196`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: múltiplas lentes, resoluções dinâmicas, 2K/4K corrigidos e 8K HEVC experimental adaptável.

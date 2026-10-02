@@ -15,30 +15,29 @@ fixed = (
     '":8080/video' + "\\n" +
     'H.264 RTSP: rtsp://" +'
 )
-count = main.count(broken)
-if count != 2:
-    raise RuntimeError(
-        f"Esperadas 2 strings MJPEG quebradas, encontradas {count}"
-    )
-main = main.replace(broken, fixed)
 
 if broken in main:
-    raise RuntimeError("Ainda existe string Kotlin com barra antes da quebra de linha")
+    raise RuntimeError("Existe string Kotlin com barra antes da quebra de linha")
 if main.count(fixed) != 2:
-    raise RuntimeError("As duas strings de endereço não foram normalizadas")
+    raise RuntimeError(
+        f"Esperadas 2 strings de endereço normalizadas, encontradas {main.count(fixed)}"
+    )
 if "activeClientCount() else" in main:
     raise RuntimeError("rtspCount inválido")
 if "8K" in main or "7680" in main or "4320" in main:
     raise RuntimeError("MainActivity ainda contém código 8K")
 if main.count("{") != main.count("}"):
     raise RuntimeError("MainActivity com chaves desbalanceadas")
-MAIN.write_text(main, encoding="utf-8")
 
 front = FRONT.read_text(encoding="utf-8")
 if "CONTROL_AF_AVAILABLE_MODES\n                    ).orEmpty()" in front:
     raise RuntimeError("IntArray.orEmpty ainda presente no 4K frontal")
 if 'cameraId == "1"' not in front:
     raise RuntimeError("Fallback S21 não está restrito à câmera frontal principal")
+if "QUALITY_2160P" not in front:
+    raise RuntimeError("Perfil 2160p frontal ausente")
+if "3840" not in front or "2160" not in front:
+    raise RuntimeError("Resolução frontal 4K ausente")
 if front.count("{") != front.count("}"):
     raise RuntimeError("Front4kDirectStreamer com chaves desbalanceadas")
 
@@ -59,5 +58,6 @@ for removed in (
         raise RuntimeError(f"Arquivo 8K ainda presente: {removed}")
 
 print("Build 22 final source validation passed")
+print("Address strings:", main.count(fixed))
 print("Main braces:", main.count("{"), main.count("}"))
 print("Front braces:", front.count("{"), front.count("}"))

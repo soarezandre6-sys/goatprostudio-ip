@@ -474,7 +474,8 @@ class MainActivity : AppCompatActivity() {
         val physicalCameraId: String?,
         val facing: Int,
         val focalMetric: Float,
-        val focalLengthMm: Float?
+        val focalLengthMm: Float?,
+        val zoomRatio: Float = 1f
     )
 
     private fun cameraFocalMetric(chars: CameraCharacteristics): Float {
@@ -687,6 +688,40 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Some Samsung devices keep the tele sensor behind the logical
+        // rear camera instead of publishing it as a separate Camera2 ID.
+        // In that case expose a Tele option through the logical camera and ask
+        // the HAL for a 3x zoom ratio, which lets the OEM choose the tele
+        // physical sensor internally when supported.
+        val hasRealTele = labeled.any {
+            it.label.startsWith("Tele", ignoreCase = true)
+        }
+        if (!hasRealTele && primaryBackId != null && Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                val chars = manager.getCameraCharacteristics(primaryBackId)
+                val zoomRange = chars.get(
+                    CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                )
+                val maxZoom = zoomRange?.upper ?: 1f
+                if (maxZoom >= 2.9f) {
+                    labeled.add(
+                        CameraLensOption(
+                            key = "",
+                            label = "Tele • 3x",
+                            logicalCameraId = primaryBackId,
+                            physicalCameraId = null,
+                            facing = CameraSelector.LENS_FACING_BACK,
+                            focalMetric =
+                                if (mainMetric.isFinite()) mainMetric * 3f
+                                else Float.MAX_VALUE,
+                            focalLengthMm = null,
+                            zoomRatio = 3f.coerceAtMost(maxZoom)
+                        )
+                    )
+                }
+            }
+        }
+
         front.forEachIndexed { index, row ->
             val suffix = if (front.size > 1) "Frontal " + (index + 1) else null
             val role = if (suffix == null) "Frontal" else suffix
@@ -811,6 +846,8 @@ class MainActivity : AppCompatActivity() {
     ): DirectCameraSource? {
         val target = Size(7680, 4320)
         var sensorFallback: DirectCameraSource? = null
+        var largestSensorSource: DirectCameraSource? = null
+        var largestSensorPixels = 0L
 
         for (logicalId in manager.cameraIdList) {
             val logicalChars = runCatching {
@@ -907,6 +944,16 @@ class MainActivity : AppCompatActivity() {
                         maxOf(sensorWidth, sensorHeight)
                     val landscapeHeight =
                         minOf(sensorWidth, sensorHeight)
+                    val sensorPixels =
+                        landscapeWidth.toLong() * landscapeHeight.toLong()
+
+                    if (sensorPixels > largestSensorPixels) {
+                        largestSensorPixels = sensorPixels
+                        largestSensorSource = DirectCameraSource(
+                            logicalCameraId = logicalId,
+                            physicalCameraId = physicalId
+                        )
+                    }
 
                     if (
                         landscapeWidth >= target.width &&
@@ -921,7 +968,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        return sensorFallback
+        if (sensorFallback != null) {
+            return sensorFallback
+        }
+
+        // Galaxy S21-family devices officially provide native 8K recording,
+        // but some firmware versions do not publish 7680x4320 through every
+        // public Camera2 capability table. For this known family, keep the
+        // experimental exact-8K option visible and try the largest rear sensor.
+        val samsungS21Family =
+            Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
+                Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
+                    .matches(Build.MODEL.orEmpty())
+
+        return if (samsungS21Family) largestSensorSource else null
     }
 
     private fun supportedResolutionOptions(): List<ResolutionOption> {
@@ -1378,6 +1438,11 @@ class MainActivity : AppCompatActivity() {
                     previewUseCase = preview
                     currentCamera =
                         provider.bindToLifecycle(this, selector, preview)
+                    runCatching {
+                        currentCamera?.cameraControl?.setZoomRatio(
+                            cameraOption?.zoomRatio ?: 1f
+                        )
+                    }
                     torchEnabled = false
                     updateTorchButton()
                     if (!server.isRunning()) setReadyState()
@@ -1558,6 +1623,11 @@ class MainActivity : AppCompatActivity() {
                 previewUseCase = preview
                 analysisUseCase = analysis
                 currentCamera = provider.bindToLifecycle(this, selector, preview, analysis)
+                runCatching {
+                    currentCamera?.cameraControl?.setZoomRatio(
+                        cameraOption?.zoomRatio ?: 1f
+                    )
+                }
                 manualExposureEnabled = false
                 manualRequestApplied = false
                 manualControlStatus = "Exposição automática"

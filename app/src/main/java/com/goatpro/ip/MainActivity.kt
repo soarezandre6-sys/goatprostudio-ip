@@ -81,7 +81,8 @@ class MainActivity : AppCompatActivity() {
         key = "1920x1080",
         label = "Full HD · 1920×1080",
         size = Size(1920, 1080),
-        highResolution = false
+        highResolution = false,
+        directHevc = false
     )
 
     private var availableResolutionOptions: List<ResolutionOption> =
@@ -194,6 +195,95 @@ class MainActivity : AppCompatActivity() {
                     codecConfig
                 )
             }
+        })
+    }
+
+    private val hevcRtspServer: RtspH265Server by lazy {
+        RtspH265Server(8554, object : RtspH265Server.Listener {
+            override fun onActiveClientCountChanged(count: Int) {
+                if (count > 0) {
+                    hevcDirectStreamer.requestKeyFrame()
+                }
+                runOnUiThread {
+                    updateConnectionStatus(server.videoClientCount())
+                }
+            }
+        })
+    }
+
+    private val hevcDirectStreamer: HevcDirectStreamer by lazy {
+        HevcDirectStreamer(this, object : HevcDirectStreamer.Listener {
+            override fun onAccessUnit(
+                data: ByteArray,
+                presentationTimeUs: Long,
+                keyFrame: Boolean,
+                codecConfig: Boolean
+            ) {
+                hevcRtspServer.onAccessUnit(
+                    data,
+                    presentationTimeUs,
+                    keyFrame,
+                    codecConfig
+                )
+            }
+
+            override fun onStarted(
+                width: Int,
+                height: Int,
+                fps: Int,
+                bitrate: Int
+            ) {
+                runOnUiThread {
+                    actualStreamWidth = width
+                    actualStreamHeight = height
+                    statusText.text =
+                        "TRANSMITINDO 8K HEVC PARA O GOAT PRO STUDIO"
+                    statusText.setTextColor(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            R.color.green
+                        )
+                    )
+                    performanceText.text =
+                        "8K direto por hardware • HEVC/H.265 • " +
+                            fps + " FPS • " +
+                            String.format(
+                                java.util.Locale.US,
+                                "%.1f Mbps",
+                                bitrate / 1_000_000.0
+                            )
+                    updateStreamInfo()
+                    refreshAddress()
+                }
+            }
+
+            override fun onError(message: String) {
+                runOnUiThread {
+                    hevcRtspServer.stop()
+                    server.stop()
+                    setError("8K HEVC: " + message)
+                    updateConnectionStatus(0)
+                    streamButton.text = "Iniciar transmissão"
+                    streamButton.setBackgroundResource(
+                        R.drawable.bg_button_primary
+                    )
+                    streamButton.backgroundTintList = null
+                    streamButton.setTextColor(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            R.color.black
+                        )
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        message,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    startCamera()
+                }
+            }
+
+            override fun onStopped() = Unit
         })
     }
 
@@ -330,7 +420,8 @@ class MainActivity : AppCompatActivity() {
         val key: String,
         val label: String,
         val size: Size,
-        val highResolution: Boolean
+        val highResolution: Boolean,
+        val directHevc: Boolean
     )
 
     private fun resolutionKey(size: Size): String =
@@ -338,6 +429,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun resolutionLabel(size: Size): String {
         val prefix = when {
+            size.width == 7680 && size.height == 4320 -> "8K UHD · HEVC experimental · "
             size.width == 3840 && size.height == 2160 -> "4K UHD · "
             size.width == 2560 && size.height == 1440 -> "2K QHD · "
             size.width == 1920 && size.height == 1080 -> "Full HD · "
@@ -358,7 +450,7 @@ class MainActivity : AppCompatActivity() {
     private fun isUsableVideoResolution(size: Size): Boolean {
         val landscape = canonicalLandscapeSize(size)
         if (landscape.width < 640 || landscape.height < 360) return false
-        if (landscape.width > 3840 || landscape.height > 2160) return false
+        if (landscape.width > 7680 || landscape.height > 4320) return false
 
         val aspect = landscape.width.toFloat() / landscape.height.toFloat()
         val target = 16f / 9f
@@ -703,68 +795,142 @@ class MainActivity : AppCompatActivity() {
 
     private fun supportedResolutionOptions(): List<ResolutionOption> {
         return try {
-            val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val manager =
+                getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val option = selectedCameraOption
-            val cameraIds = listOfNotNull(
-                option?.physicalCameraId,
-                option?.logicalCameraId
-            ).distinct()
+            val characteristicId =
+                option?.physicalCameraId ?: option?.logicalCameraId
 
             val regular = linkedMapOf<String, Size>()
             val high = linkedMapOf<String, Size>()
+            val directHevc = linkedMapOf<String, Size>()
 
-            fun collect(target: MutableMap<String, Size>, sizes: Array<Size>?) {
+            fun collectYuv(
+                target: MutableMap<String, Size>,
+                sizes: Array<Size>?
+            ) {
                 sizes.orEmpty().forEach { raw ->
                     val size = canonicalLandscapeSize(raw)
                     if (!isUsableVideoResolution(size)) return@forEach
+                    if (size.width > 3840 || size.height > 2160) {
+                        return@forEach
+                    }
                     target[resolutionKey(size)] = size
                 }
             }
 
-            cameraIds.forEach { cameraId ->
+            if (characteristicId != null) {
                 runCatching {
-                    val map = manager.getCameraCharacteristics(cameraId)
-                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    val map = manager
+                        .getCameraCharacteristics(characteristicId)
+                        .get(
+                            CameraCharacteristics
+                                .SCALER_STREAM_CONFIGURATION_MAP
+                        )
 
-                    collect(regular, map?.getOutputSizes(ImageFormat.YUV_420_888))
-                    collect(high, map?.getHighResolutionOutputSizes(ImageFormat.YUV_420_888))
+                    collectYuv(
+                        regular,
+                        map?.getOutputSizes(ImageFormat.YUV_420_888)
+                    )
+                    collectYuv(
+                        high,
+                        map?.getHighResolutionOutputSizes(
+                            ImageFormat.YUV_420_888
+                        )
+                    )
+
+                    map?.getOutputSizes(
+                        android.media.MediaCodec::class.java
+                    ).orEmpty().forEach { raw ->
+                        val size = canonicalLandscapeSize(raw)
+                        if (!isUsableVideoResolution(size)) return@forEach
+                        if (size.width <= 3840) return@forEach
+                        if (
+                            hevcDirectStreamer.supports(
+                                size.width,
+                                size.height,
+                                24
+                            )
+                        ) {
+                            directHevc[resolutionKey(size)] = size
+                        }
+                    }
                 }
             }
 
-            val combined = linkedMapOf<String, Size>()
-            regular.forEach { (key, size) -> combined[key] = size }
-            high.forEach { (key, size) -> combined[key] = size }
-
-            val options = combined.values
-                .sortedWith(
-                    compareBy<Size> { it.width.toLong() * it.height.toLong() }
-                        .thenBy { it.width }
+            val combined = linkedMapOf<String, ResolutionOption>()
+            regular.forEach { (key, size) ->
+                combined[key] = ResolutionOption(
+                    key = key,
+                    label = resolutionLabel(size),
+                    size = size,
+                    highResolution =
+                        size.width.toLong() * size.height.toLong() >
+                            1920L * 1080L,
+                    directHevc = false
                 )
-                .map { size ->
-                    val key = resolutionKey(size)
-                    ResolutionOption(
-                        key = key,
-                        label = resolutionLabel(size),
-                        size = size,
-                        highResolution =
-                            high.containsKey(key) ||
-                                size.width.toLong() * size.height.toLong() >
-                                1920L * 1080L
-                    )
-                }
+            }
+            high.forEach { (key, size) ->
+                combined[key] = ResolutionOption(
+                    key = key,
+                    label = resolutionLabel(size),
+                    size = size,
+                    highResolution = true,
+                    directHevc = false
+                )
+            }
+            directHevc.forEach { (key, size) ->
+                combined[key] = ResolutionOption(
+                    key = key,
+                    label = resolutionLabel(size),
+                    size = size,
+                    highResolution = true,
+                    directHevc = true
+                )
+            }
+
+            val options = combined.values.sortedWith(
+                compareBy<ResolutionOption> {
+                    it.size.width.toLong() * it.size.height.toLong()
+                }.thenBy { it.size.width }
+            )
 
             if (options.isNotEmpty()) {
                 options
             } else {
                 listOf(
-                    ResolutionOption("1280x720", "HD · 1280×720", Size(1280, 720), false),
-                    ResolutionOption("1920x1080", "Full HD · 1920×1080", Size(1920, 1080), false)
+                    ResolutionOption(
+                        "1280x720",
+                        "HD · 1280×720",
+                        Size(1280, 720),
+                        false,
+                        false
+                    ),
+                    ResolutionOption(
+                        "1920x1080",
+                        "Full HD · 1920×1080",
+                        Size(1920, 1080),
+                        false,
+                        false
+                    )
                 )
             }
         } catch (_: Exception) {
             listOf(
-                ResolutionOption("1280x720", "HD · 1280×720", Size(1280, 720), false),
-                ResolutionOption("1920x1080", "Full HD · 1920×1080", Size(1920, 1080), false)
+                ResolutionOption(
+                    "1280x720",
+                    "HD · 1280×720",
+                    Size(1280, 720),
+                    false,
+                    false
+                ),
+                ResolutionOption(
+                    "1920x1080",
+                    "Full HD · 1920×1080",
+                    Size(1920, 1080),
+                    false,
+                    false
+                )
             )
         }
     }
@@ -799,6 +965,11 @@ class MainActivity : AppCompatActivity() {
     private fun applyHighResolutionDefaults(option: ResolutionOption) {
         val width = option.size.width
         when {
+            option.directHevc -> {
+                streamJpegQuality = 50
+                streamTargetFps = 24
+                selectedQualityProfile = QualityProfile.CUSTOM
+            }
             width >= 3840 -> {
                 streamJpegQuality = 50
                 streamTargetFps = 10
@@ -860,6 +1031,7 @@ class MainActivity : AppCompatActivity() {
             "FHD", "1080P" -> "1920x1080"
             "QHD", "2K", "1440P" -> "2560x1440"
             "UHD", "4K", "2160P" -> "3840x2160"
+            "8K", "4320P" -> "7680x4320"
             else -> requested.replace("×", "x").lowercase()
         }
 
@@ -1010,6 +1182,69 @@ class MainActivity : AppCompatActivity() {
                 autoSurfaceRotation
             } else {
                 Surface.ROTATION_0
+            }
+
+            if (selectedResolution.directHevc) {
+                if (
+                    hevcDirectStreamer.isRunning() ||
+                    hevcDirectStreamer.isStarting()
+                ) {
+                    return@addListener
+                }
+
+                val previewResolutionSelector =
+                    ResolutionSelector.Builder()
+                        .setAllowedResolutionMode(
+                            ResolutionSelector
+                                .PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION
+                        )
+                        .setAspectRatioStrategy(
+                            AspectRatioStrategy
+                                .RATIO_16_9_FALLBACK_AUTO_STRATEGY
+                        )
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                Size(1280, 720),
+                                ResolutionStrategy
+                                    .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                            )
+                        )
+                        .build()
+
+                val previewBuilder = Preview.Builder()
+                    .setResolutionSelector(previewResolutionSelector)
+                    .setTargetRotation(targetRotation)
+
+                cameraOption?.physicalCameraId?.let { physicalId ->
+                    Camera2Interop.Extender(previewBuilder)
+                        .setPhysicalCameraId(physicalId)
+                }
+
+                val preview = previewBuilder
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(
+                            previewView.surfaceProvider
+                        )
+                    }
+
+                try {
+                    provider.unbindAll()
+                    analysisUseCase = null
+                    previewUseCase = preview
+                    currentCamera =
+                        provider.bindToLifecycle(this, selector, preview)
+                    torchEnabled = false
+                    updateTorchButton()
+                    if (!server.isRunning()) setReadyState()
+                } catch (_: Exception) {
+                    previewUseCase = null
+                    analysisUseCase = null
+                    currentCamera = null
+                    updateTorchButton()
+                    setError("ERRO AO ABRIR PREVIEW 8K")
+                }
+                return@addListener
             }
 
             val analysisFallbackRule = if (selectedResolution.highResolution) {
@@ -2091,7 +2326,11 @@ class MainActivity : AppCompatActivity() {
         val ip = NetworkUtils.localIpv4()
         if (ip == null) {
             setError("CONECTE O CELULAR A UMA REDE WI-FI")
-            Toast.makeText(this, "Nenhum endereço IPv4 local encontrado.", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this,
+                "Nenhum endereço IPv4 local encontrado.",
+                Toast.LENGTH_LONG
+            ).show()
             return
         }
 
@@ -2099,42 +2338,155 @@ class MainActivity : AppCompatActivity() {
         nextEncodeDueNs = 0L
         resetPerformanceStats()
         server.start()
-        rtspServer.start()
         server.setAudioEnabled(audioEnabled)
+
         if (audioEnabled && !audioCapture.start()) {
             audioEnabled = false
             server.setAudioEnabled(false)
             updateAudioButton()
-            Toast.makeText(this, "Vídeo iniciado sem áudio.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "Vídeo iniciado sem áudio.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
-        statusText.text = "TRANSMITINDO PARA O GOAT PRO STUDIO"
-        statusText.setTextColor(ContextCompat.getColor(this, R.color.green))
+
+        if (selectedResolution.directHevc) {
+            h264Encoder.stop()
+            rtspServer.stop()
+            hevcRtspServer.start()
+
+            statusText.text =
+                "INICIANDO 8K HEVC POR HARDWARE…"
+            statusText.setTextColor(
+                ContextCompat.getColor(this, R.color.green)
+            )
+
+            val providerFuture =
+                ProcessCameraProvider.getInstance(this)
+            providerFuture.addListener({
+                try {
+                    val provider = providerFuture.get()
+                    provider.unbindAll()
+                    previewUseCase = null
+                    analysisUseCase = null
+                    currentCamera = null
+                    updateTorchButton()
+
+                    val option = selectedCameraOption
+                    if (option == null) {
+                        throw IllegalStateException(
+                            "Câmera selecionada indisponível."
+                        )
+                    }
+
+                    val size = selectedResolution.size
+                    val fps =
+                        if (streamTargetFps > 0) {
+                            streamTargetFps.coerceIn(5, 30)
+                        } else {
+                            24
+                        }
+
+                    val started = hevcDirectStreamer.start(
+                        logicalCameraId = option.logicalCameraId,
+                        physicalCameraId = option.physicalCameraId,
+                        width = size.width,
+                        height = size.height,
+                        fps = fps,
+                        bitrate =
+                            HevcDirectStreamer.recommendedBitrate(
+                                size.width,
+                                size.height,
+                                fps
+                            )
+                    )
+
+                    if (!started) {
+                        hevcRtspServer.stop()
+                        server.stop()
+                    }
+                } catch (ex: Exception) {
+                    hevcRtspServer.stop()
+                    server.stop()
+                    setError(
+                        "8K HEVC: " +
+                            (
+                                ex.message
+                                    ?: "falha ao abrir a câmera"
+                                )
+                    )
+                    startCamera()
+                }
+            }, ContextCompat.getMainExecutor(this))
+        } else {
+            hevcDirectStreamer.stop()
+            hevcRtspServer.stop()
+            rtspServer.start()
+            statusText.text =
+                "TRANSMITINDO PARA O GOAT PRO STUDIO"
+            statusText.setTextColor(
+                ContextCompat.getColor(this, R.color.green)
+            )
+        }
+
         updateConnectionStatus(0)
         streamButton.text = "Parar transmissão"
-        streamButton.setBackgroundResource(R.drawable.bg_button_danger)
+        streamButton.setBackgroundResource(
+            R.drawable.bg_button_danger
+        )
         streamButton.backgroundTintList = null
-        streamButton.setTextColor(ContextCompat.getColor(this, android.R.color.white))
+        streamButton.setTextColor(
+            ContextCompat.getColor(
+                this,
+                android.R.color.white
+            )
+        )
     }
 
     private fun stopStreaming() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        hevcDirectStreamer.stop()
         rtspServer.stop()
+        hevcRtspServer.stop()
         server.stop()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
+        actualStreamWidth = 0
+        actualStreamHeight = 0
         setReadyState()
         updateConnectionStatus(0)
         streamButton.text = "Iniciar transmissão"
-        streamButton.setBackgroundResource(R.drawable.bg_button_primary)
+        streamButton.setBackgroundResource(
+            R.drawable.bg_button_primary
+        )
         streamButton.backgroundTintList = null
-        streamButton.setTextColor(ContextCompat.getColor(this, R.color.black))
+        streamButton.setTextColor(
+            ContextCompat.getColor(this, R.color.black)
+        )
+
+        if (
+            selectedResolution.directHevc &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            startCamera()
+        }
     }
 
     private fun updateConnectionStatus(count: Int) {
         if (!::connectionStatusText.isInitialized) return
-        val totalCount = count + rtspServer.activeClientCount()
+        val rtspCount =
+            if (selectedResolution.directHevc) {
+                hevcRtspServer.activeClientCount()
+            } else {
+                rtspServer.activeClientCount()
+            }
+        val totalCount = count + rtspCount
         when {
             totalCount > 0 -> {
                 connectionStatusText.text = "CONECTADO AO GOAT PRO STUDIO • $totalCount conexão(ões)"
@@ -2168,36 +2520,92 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAddress() {
         val ip = NetworkUtils.localIpv4()
         addressText.text = if (ip != null) {
-            "MJPEG: http://$ip:8080/video\nH.264 RTSP: rtsp://$ip:8554/h264"
+            if (selectedResolution.directHevc) {
+                "8K HEVC/H.265 RTSP: rtsp://" +
+                    ip + ":8554/h265"
+            } else {
+                "MJPEG: http://" + ip +
+                    ":8080/video\nH.264 RTSP: rtsp://" +
+                    ip + ":8554/h264"
+            }
         } else {
             "Sem endereço Wi-Fi disponível"
         }
     }
 
     private fun updateStreamInfo() {
-        val profile = selectedQualityProfile
-        val dimensions = if (actualStreamWidth > 0 && actualStreamHeight > 0) {
-            "${actualStreamWidth}×${actualStreamHeight}"
-        } else {
-            selectedResolution.label
+        val dimensions =
+            if (actualStreamWidth > 0 && actualStreamHeight > 0) {
+                actualStreamWidth.toString() +
+                    "×" + actualStreamHeight
+            } else {
+                selectedResolution.label
+            }
+        val fpsLabel =
+            if (streamTargetFps > 0) {
+                streamTargetFps.toString() + " FPS"
+            } else {
+                "FPS sem limite"
+            }
+
+        if (selectedResolution.directHevc) {
+            streamInfoText.text =
+                dimensions + " • " + fpsLabel +
+                    " • HEVC/H.265 hardware • 8K experimental"
+            return
         }
-        val fpsLabel = if (streamTargetFps > 0) "$streamTargetFps FPS" else "FPS sem limite"
-        val profileLabel = if (profile == QualityProfile.CUSTOM) "Personalizado" else profile.shortLabel
+
+        val profile = selectedQualityProfile
+        val profileLabel =
+            if (profile == QualityProfile.CUSTOM) {
+                "Personalizado"
+            } else {
+                profile.shortLabel
+            }
         streamInfoText.text =
-            "$dimensions • $fpsLabel • JPEG Q$streamJpegQuality • $profileLabel • ${selectedRotationMode.shortLabel}"
+            dimensions + " • " + fpsLabel +
+                " • JPEG Q" + streamJpegQuality +
+                " • " + profileLabel +
+                " • " + selectedRotationMode.shortLabel
     }
 
     private fun copyAddressToClipboard() {
         val ip = NetworkUtils.localIpv4()
         if (ip == null) {
-            Toast.makeText(this, "Conecte o celular ao Wi-Fi primeiro.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "Conecte o celular ao Wi-Fi primeiro.",
+                Toast.LENGTH_SHORT
+            ).show()
             return
         }
+
         val urls =
-            "MJPEG: http://$ip:8080/video\nH.264 RTSP: rtsp://$ip:8554/h264"
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("GOAT Cam", urls))
-        Toast.makeText(this, "Endereços MJPEG e H.264 copiados", Toast.LENGTH_SHORT).show()
+            if (selectedResolution.directHevc) {
+                "8K HEVC/H.265 RTSP: rtsp://" +
+                    ip + ":8554/h265"
+            } else {
+                "MJPEG: http://" + ip +
+                    ":8080/video\nH.264 RTSP: rtsp://" +
+                    ip + ":8554/h264"
+            }
+
+        val clipboard =
+            getSystemService(
+                Context.CLIPBOARD_SERVICE
+            ) as ClipboardManager
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("GOAT Cam", urls)
+        )
+        Toast.makeText(
+            this,
+            if (selectedResolution.directHevc) {
+                "Endereço 8K HEVC copiado"
+            } else {
+                "Endereços MJPEG e H.264 copiados"
+            },
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     override fun onResume() {
@@ -2222,7 +2630,9 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        hevcDirectStreamer.stop()
         rtspServer.stop()
+        hevcRtspServer.stop()
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()

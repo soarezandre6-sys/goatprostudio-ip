@@ -373,6 +373,8 @@ class MainActivity : AppCompatActivity() {
 
         val ratio = metric / mainMetric
         return when {
+            count >= 3 && fallbackIndex == 0 && ratio < 0.95f -> "Ultra-wide"
+            count >= 3 && fallbackIndex == count - 1 && ratio > 1.05f -> "Tele"
             ratio < 0.82f -> "Ultra-wide"
             ratio > 1.22f -> "Tele"
             else -> "Traseira principal"

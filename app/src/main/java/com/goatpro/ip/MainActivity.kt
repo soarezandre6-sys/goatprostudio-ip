@@ -207,7 +207,14 @@ class MainActivity : AppCompatActivity() {
         RtspH265Server(8554, object : RtspH265Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
-                    hevcDirectStreamer.requestKeyFrame()
+                    if (
+                        mediaRecorderHevcStreamer.isRunning() ||
+                        mediaRecorderHevcStreamer.isStarting()
+                    ) {
+                        mediaRecorderHevcStreamer.requestKeyFrame()
+                    } else {
+                        hevcDirectStreamer.requestKeyFrame()
+                    }
                 }
                 runOnUiThread {
                     updateConnectionStatus(server.videoClientCount())
@@ -330,6 +337,131 @@ class MainActivity : AppCompatActivity() {
 
             override fun onStopped() = Unit
         })
+    }
+
+    private val mediaRecorderHevcStreamer:
+        MediaRecorderHevcStreamer by lazy {
+        MediaRecorderHevcStreamer(
+            this,
+            object : MediaRecorderHevcStreamer.Listener {
+                override fun onAccessUnit(
+                    data: ByteArray,
+                    presentationTimeUs: Long,
+                    keyFrame: Boolean,
+                    codecConfig: Boolean
+                ) {
+                    hevcRtspServer.onAccessUnit(
+                        data,
+                        presentationTimeUs,
+                        keyFrame,
+                        codecConfig
+                    )
+                }
+
+                override fun onStarted(
+                    width: Int,
+                    height: Int,
+                    fps: Int,
+                    bitrate: Int
+                ) {
+                    runOnUiThread {
+                        actualStreamWidth = width
+                        actualStreamHeight = height
+                        statusText.text =
+                            "TRANSMITINDO 8K MEDIARECORDER PARA O GOAT PRO STUDIO"
+                        statusText.setTextColor(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                R.color.green
+                            )
+                        )
+                        performanceText.text =
+                            "8K MediaRecorder • HEVC/H.265 • " +
+                                fps + " FPS • " +
+                                String.format(
+                                    java.util.Locale.US,
+                                    "%.1f Mbps",
+                                    bitrate / 1_000_000.0
+                                )
+                        updateStreamInfo()
+                        refreshAddress()
+                    }
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        hevcRtspServer.stop()
+                        server.stop()
+                        updateConnectionStatus(0)
+
+                        val fallback =
+                            fallbackResolutionAfterHevcFailure
+                        if (fallback != null) {
+                            fallbackResolutionAfterHevcFailure = null
+                            selectedResolution = fallback
+                            applyHighResolutionDefaults(fallback)
+
+                            if (::resolutionSpinner.isInitialized) {
+                                val index =
+                                    availableResolutionOptions
+                                        .indexOfFirst {
+                                            it.key == fallback.key
+                                        }
+                                if (index >= 0) {
+                                    resolutionSpinner.setSelection(
+                                        index
+                                    )
+                                }
+                            }
+
+                            actualStreamWidth = 0
+                            actualStreamHeight = 0
+                            nextEncodeDueNs = 0L
+                            resetPerformanceStats()
+                            updateStreamInfo()
+                            refreshAddress()
+
+                            setError(
+                                "8K MediaRecorder recusado • restaurando " +
+                                    fallback.label
+                            )
+                            Toast.makeText(
+                                this@MainActivity,
+                                "8K recusado. Voltando automaticamente para " +
+                                    fallback.label + ".",
+                                Toast.LENGTH_LONG
+                            ).show()
+
+                            autoRestartStreamAfterCameraBind = true
+                            startCamera()
+                            return@runOnUiThread
+                        }
+
+                        setError("8K MediaRecorder: " + message)
+                        streamButton.text =
+                            "Iniciar transmissão"
+                        streamButton.setBackgroundResource(
+                            R.drawable.bg_button_primary
+                        )
+                        streamButton.backgroundTintList = null
+                        streamButton.setTextColor(
+                            ContextCompat.getColor(
+                                this@MainActivity,
+                                R.color.black
+                            )
+                        )
+                        Toast.makeText(
+                            this@MainActivity,
+                            message,
+                            Toast.LENGTH_LONG
+                        ).show()
+                        startCamera()
+                    }
+                }
+
+                override fun onStopped() = Unit
+            }
+        )
     }
 
     private val audioCapture by lazy {
@@ -1570,7 +1702,9 @@ class MainActivity : AppCompatActivity() {
             if (selectedResolution.directHevc) {
                 if (
                     hevcDirectStreamer.isRunning() ||
-                    hevcDirectStreamer.isStarting()
+                    hevcDirectStreamer.isStarting() ||
+                    mediaRecorderHevcStreamer.isRunning() ||
+                    mediaRecorderHevcStreamer.isStarting()
                 ) {
                     return@addListener
                 }
@@ -2812,7 +2946,8 @@ class MainActivity : AppCompatActivity() {
                                 fps
                             )
 
-                    val started = hevcDirectStreamer.start(
+                    hevcDirectStreamer.stop()
+                    val started = mediaRecorderHevcStreamer.start(
                         logicalCameraId = logicalCameraId,
                         physicalCameraId = physicalCameraId,
                         width = size.width,
@@ -2839,6 +2974,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }, ContextCompat.getMainExecutor(this))
         } else {
+            mediaRecorderHevcStreamer.stop()
             hevcDirectStreamer.stop()
             hevcRtspServer.stop()
             rtspServer.start()
@@ -2867,6 +3003,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()
         hevcRtspServer.stop()
@@ -3049,6 +3186,7 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        mediaRecorderHevcStreamer.stop()
         hevcDirectStreamer.stop()
         rtspServer.stop()
         hevcRtspServer.stop()

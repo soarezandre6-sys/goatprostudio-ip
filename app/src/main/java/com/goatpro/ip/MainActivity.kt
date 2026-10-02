@@ -1014,105 +1014,115 @@ class MainActivity : AppCompatActivity() {
             val manager =
                 getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val option = selectedCameraOption
-            val characteristicId =
-                option?.physicalCameraId ?: option?.logicalCameraId
+            val cameraIds = listOfNotNull(
+                option?.physicalCameraId,
+                option?.logicalCameraId
+            ).distinct()
 
-            val regular = linkedMapOf<String, Size>()
-            val high = linkedMapOf<String, Size>()
-            val directHevc = linkedMapOf<String, Size>()
+            val standard = linkedMapOf<String, Size>()
+            val standardKeys = setOf(
+                "1280x720",
+                "1920x1080",
+                "2560x1440",
+                "3840x2160"
+            )
 
-            fun collectYuv(
-                target: MutableMap<String, Size>,
-                sizes: Array<Size>?
-            ) {
+            fun collectStandard(sizes: Array<Size>?) {
                 sizes.orEmpty().forEach { raw ->
                     val size = canonicalLandscapeSize(raw)
                     if (!isUsableVideoResolution(size)) return@forEach
-                    if (size.width > 3840 || size.height > 2160) {
-                        return@forEach
+                    val key = resolutionKey(size)
+                    if (key in standardKeys) {
+                        standard[key] = size
                     }
-                    target[resolutionKey(size)] = size
                 }
             }
 
-            if (characteristicId != null) {
+            cameraIds.forEach { cameraId ->
                 runCatching {
                     val map = manager
-                        .getCameraCharacteristics(characteristicId)
+                        .getCameraCharacteristics(cameraId)
                         .get(
                             CameraCharacteristics
                                 .SCALER_STREAM_CONFIGURATION_MAP
                         )
 
-                    collectYuv(
-                        regular,
+                    collectStandard(
                         map?.getOutputSizes(ImageFormat.YUV_420_888)
                     )
-                    collectYuv(
-                        high,
+                    collectStandard(
                         map?.getHighResolutionOutputSizes(
                             ImageFormat.YUV_420_888
                         )
                     )
-
-                    map?.getOutputSizes(
-                        android.media.MediaCodec::class.java
-                    ).orEmpty().forEach { raw ->
-                        val size = canonicalLandscapeSize(raw)
-                        if (!isUsableVideoResolution(size)) return@forEach
-                        if (size.width <= 3840) return@forEach
-                        if (
-                            hevcDirectStreamer.supports(
-                                size.width,
-                                size.height,
-                                24
-                            )
-                        ) {
-                            directHevc[resolutionKey(size)] = size
-                        }
-                    }
+                    collectStandard(
+                        map?.getOutputSizes(
+                            android.media.MediaCodec::class.java
+                        )
+                    )
+                    collectStandard(
+                        map?.getOutputSizes(
+                            android.media.MediaRecorder::class.java
+                        )
+                    )
                 }
             }
 
-            val combined = linkedMapOf<String, ResolutionOption>()
-            regular.forEach { (key, size) ->
-                combined[key] = ResolutionOption(
+            val options = standard.values.map { size ->
+                val key = resolutionKey(size)
+                val is4k =
+                    size.width == 3840 && size.height == 2160
+                ResolutionOption(
                     key = key,
                     label = resolutionLabel(size),
                     size = size,
                     highResolution =
                         size.width.toLong() * size.height.toLong() >
                             1920L * 1080L,
-                    directHevc = false
+                    directHevc = false,
+                    directH264 =
+                        is4k &&
+                            h264DirectStreamer.supports(
+                                size.width,
+                                size.height,
+                                10
+                            )
                 )
-            }
-            high.forEach { (key, size) ->
-                combined[key] = ResolutionOption(
-                    key = key,
-                    label = resolutionLabel(size),
-                    size = size,
-                    highResolution = true,
-                    directHevc = false
-                )
-            }
-            directHevc.forEach { (key, size) ->
-                combined[key] = ResolutionOption(
-                    key = key,
-                    label = resolutionLabel(size),
-                    size = size,
-                    highResolution = true,
-                    directHevc = true
-                )
+            }.toMutableList()
+
+            if (
+                option?.facing == CameraSelector.LENS_FACING_BACK
+            ) {
+                val source = find8kCameraSource(manager)
+                if (source != null) {
+                    val size = Size(7680, 4320)
+                    options.removeAll { it.key == "7680x4320" }
+                    options.add(
+                        ResolutionOption(
+                            key = "7680x4320",
+                            label =
+                                "8K UHD · 7680×4320 · 10 FPS experimental",
+                            size = size,
+                            highResolution = true,
+                            directHevc = true,
+                            directH264 = false,
+                            overrideLogicalCameraId =
+                                source.logicalCameraId,
+                            overridePhysicalCameraId =
+                                source.physicalCameraId
+                        )
+                    )
+                }
             }
 
-            val options = combined.values.sortedWith(
+            val sorted = options.sortedWith(
                 compareBy<ResolutionOption> {
                     it.size.width.toLong() * it.size.height.toLong()
                 }.thenBy { it.size.width }
             )
 
-            if (options.isNotEmpty()) {
-                options
+            if (sorted.isNotEmpty()) {
+                sorted
             } else {
                 listOf(
                     ResolutionOption(
@@ -1182,17 +1192,22 @@ class MainActivity : AppCompatActivity() {
         val width = option.size.width
         when {
             option.directHevc -> {
-                streamJpegQuality = 50
-                streamTargetFps = 24
+                streamJpegQuality = maxOf(streamJpegQuality, 90)
+                streamTargetFps = 10
+                selectedQualityProfile = QualityProfile.CUSTOM
+            }
+            option.directH264 -> {
+                streamJpegQuality = maxOf(streamJpegQuality, 80)
+                streamTargetFps = 10
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width >= 3840 -> {
-                streamJpegQuality = 50
+                streamJpegQuality = maxOf(streamJpegQuality, 80)
                 streamTargetFps = 10
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
             width > 1920 -> {
-                streamJpegQuality = 58
+                streamJpegQuality = maxOf(streamJpegQuality, 70)
                 streamTargetFps = 15
                 selectedQualityProfile = QualityProfile.CUSTOM
             }
@@ -1221,7 +1236,8 @@ class MainActivity : AppCompatActivity() {
         if (option.key == selectedResolution.key) return
 
         val transportModeChanged =
-            option.directHevc != selectedResolution.directHevc
+            option.directHevc != selectedResolution.directHevc ||
+                option.directH264 != selectedResolution.directH264
         if (transportModeChanged && server.isRunning()) {
             stopStreaming()
         }

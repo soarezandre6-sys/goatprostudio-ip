@@ -730,3 +730,20 @@ Branch: `build-20-goat-cam`
 - o resumo aparece na própria interface;
 - não usa root, APK auxiliar nem API escondida: diagnostica somente o que o firmware expõe publicamente ao GOAT Cam;
 - nenhuma APK da Build 20 foi gerada nesta etapa.
+
+
+### APK de teste — Build 20
+- primeira tentativa de compilação: run 37060926590 (#31), falhou por `IntArray.orEmpty()` no diagnóstico;
+- correção aplicada em `SamsungVendorDiagnostics.kt`;
+- compilação válida: run 37061169723 (#32);
+- conclusão: success;
+- branch: `build-20-goat-cam`;
+- head commit da execução: `e094d36058273545f24e76f8f8cd3800eb59fa89`;
+- artifact: `goat-cam-build-20-debug`;
+- artifact id: 11250896077;
+- artifact digest: `sha256:12b81fc1279aba89b68885f2155e4a73160bf2853a2413c3acc1aea174915bad`;
+- APK: `GOAT-Cam-Build-20-Teste.apk`;
+- tamanho do APK: 4.883.248 bytes;
+- APK SHA-256: `0ce04e895a7ff767ace23ccd0e8c2f39b86441b7873038c45e783fbfb367cf43`;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: executar `Diagnóstico 8K Samsung`, copiar o relatório completo e analisar vendor/session keys expostas pelo aparelho.

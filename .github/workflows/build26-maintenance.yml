@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Apply Build 26 integration
-        run: python tools/build26_integrate.py
+        run: python tools/build26_runner.py
       - name: Validate and commit
         run: |
           git config user.name "github-actions[bot]"

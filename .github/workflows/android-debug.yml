@@ -3,9 +3,9 @@ name: Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [ build-21-goat-cam ]
+    branches: [ build-23-goat-cam ]
     paths:
-      - ".github/build-21.trigger"
+      - ".github/build-23.trigger"
 
 jobs:
   build:
@@ -23,5 +23,5 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: goat-cam-build-21-debug
+          name: goat-cam-build-23-debug
           path: app/build/outputs/apk/debug/app-debug.apk

@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DiscoveryResponder(
     private val httpPort: Int = 8080,
     private val isStreaming: () -> Boolean,
-    private val isAudioEnabled: () -> Boolean
+    private val isAudioEnabled: () -> Boolean,
+    private val rtspCodec: () -> String = { "H264" }
 ) {
     private val running = AtomicBoolean(false)
     private var socket: DatagramSocket? = null
@@ -38,6 +39,8 @@ class DiscoveryResponder(
                             append("|video=/video")
                             append("|rtspPort=8554")
                             append("|h264=/h264")
+                            append("|h265=/h265")
+                            append("|rtspCodec=").append(rtspCodec())
                             append("|audio=/audio.pcm")
                             append("|streaming=").append(if (isStreaming()) "1" else "0")
                             append("|audioEnabled=").append(if (isAudioEnabled()) "1" else "0")

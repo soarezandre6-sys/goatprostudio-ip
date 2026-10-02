@@ -99,9 +99,11 @@ class SamsungVendorDiagnostics(
                 else -> "UNKNOWN"
             }
 
-            val capabilities = chars.get(
-                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
-            ).orEmpty().joinToString(",")
+            val capabilities = (
+                chars.get(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+                ) ?: intArrayOf()
+            ).joinToString(",")
 
             val physicalIds =
                 if (Build.VERSION.SDK_INT >= 28) {

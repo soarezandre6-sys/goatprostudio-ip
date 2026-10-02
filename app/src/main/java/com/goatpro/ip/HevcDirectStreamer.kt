@@ -100,7 +100,7 @@ class HevcDirectStreamer(
         synchronized(lock) {
             if (running.get() || starting.get()) return true
 
-            val safeFps = fps.coerceIn(5, 15)
+            val safeFps = fps.coerceIn(5, 30)
             val safeBitrate = bitrate.coerceIn(8_000_000, 80_000_000)
 
             return try {

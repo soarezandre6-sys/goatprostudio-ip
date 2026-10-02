@@ -765,3 +765,19 @@ Branch: `build-21-goat-cam`
 - o arquivo de sucesso fica em armazenamento específico do app, pasta Movies/GOAT-Cam;
 - 4K, tele e diagnóstico vendor da Build 20 foram preservados;
 - APK ainda não gerado nesta etapa.
+
+
+### APK de teste — Build 21
+- workflow: Android Debug APK;
+- run: 37063451222 (#33);
+- conclusão: success;
+- branch: `build-21-goat-cam`;
+- head commit da execução: `ad336e73bd424b6eeeffaac87a6582f3d5e982b6`;
+- artifact: `goat-cam-build-21-debug`;
+- artifact id: 11252120052;
+- artifact digest: `sha256:0ad53e35ec58ea7b25bca7d9352a05eb929c9bc098988ab1b657a8ed4c2a74ab`;
+- APK: `GOAT-Cam-Build-21-Teste.apk`;
+- tamanho do APK: 4.899.812 bytes;
+- APK SHA-256: `61b5c8f761202898a33a3d761c2bed8b35e9cabebf53acbb332a8ac4acf2247b`;
+- compilação `:app:assembleDebug`: sucesso;
+- teste: tocar em `Teste local 8K oficial (5 s)`; o app usa `CamcorderProfile.QUALITY_8KUHD` + `MediaRecorder.setProfile()` e confirma a resolução final do arquivo.

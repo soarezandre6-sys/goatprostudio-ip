@@ -316,6 +316,29 @@
                 android:textAllCaps="false"
                 android:textColor="@color/text"
                 android:textStyle="bold" />
+
+
+            <Button
+                android:id="@+id/vendorDiagnosticButton"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/bg_button_round"
+                android:backgroundTint="@color/panel_3"
+                android:elevation="4dp"
+                android:text="Diagnóstico 8K Samsung"
+                android:textAllCaps="false"
+                android:textColor="@color/gold_soft"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/vendorDiagnosticText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:text="Diagnóstico vendor ainda não executado."
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <LinearLayout

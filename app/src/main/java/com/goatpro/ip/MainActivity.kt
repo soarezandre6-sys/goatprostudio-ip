@@ -295,7 +295,10 @@ class MainActivity : AppCompatActivity() {
         DiscoveryResponder(
             httpPort = 8080,
             isStreaming = { server.isRunning() },
-            isAudioEnabled = { audioEnabled && server.isAudioEnabled() }
+            isAudioEnabled = { audioEnabled && server.isAudioEnabled() },
+            rtspCodec = {
+                if (selectedResolution.directHevc) "H265" else "H264"
+            }
         )
     }
 
@@ -1003,6 +1006,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (option.key == selectedResolution.key) return
+
+        val transportModeChanged =
+            option.directHevc != selectedResolution.directHevc
+        if (transportModeChanged && server.isRunning()) {
+            stopStreaming()
+        }
 
         selectedResolution = option
         applyHighResolutionDefaults(option)

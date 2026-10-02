@@ -171,11 +171,17 @@ class MainActivity : AppCompatActivity() {
         RtspH264Server(8554, object : RtspH264Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
-                    h264Encoder.requestKeyFrame()
-                } else {
+                    if (selectedResolution.directH264) {
+                        h264DirectStreamer.requestKeyFrame()
+                    } else {
+                        h264Encoder.requestKeyFrame()
+                    }
+                } else if (!selectedResolution.directH264) {
                     h264Encoder.stop()
                 }
-                runOnUiThread { updateConnectionStatus(server.videoClientCount()) }
+                runOnUiThread {
+                    updateConnectionStatus(server.videoClientCount())
+                }
             }
         })
     }
@@ -195,6 +201,82 @@ class MainActivity : AppCompatActivity() {
                     codecConfig
                 )
             }
+        })
+    }
+
+    private val h264DirectStreamer: H264DirectStreamer by lazy {
+        H264DirectStreamer(this, object : H264DirectStreamer.Listener {
+            override fun onAccessUnit(
+                data: ByteArray,
+                presentationTimeUs: Long,
+                keyFrame: Boolean,
+                codecConfig: Boolean
+            ) {
+                rtspServer.onAccessUnit(
+                    data,
+                    presentationTimeUs,
+                    keyFrame,
+                    codecConfig
+                )
+            }
+
+            override fun onStarted(
+                width: Int,
+                height: Int,
+                fps: Int,
+                bitrate: Int
+            ) {
+                runOnUiThread {
+                    actualStreamWidth = width
+                    actualStreamHeight = height
+                    statusText.text =
+                        "TRANSMITINDO 4K H.264 POR HARDWARE"
+                    statusText.setTextColor(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            R.color.green
+                        )
+                    )
+                    performanceText.text =
+                        "4K direto por hardware • H.264 • " +
+                            fps + " FPS • " +
+                            String.format(
+                                java.util.Locale.US,
+                                "%.1f Mbps",
+                                bitrate / 1_000_000.0
+                            )
+                    updateStreamInfo()
+                    refreshAddress()
+                }
+            }
+
+            override fun onError(message: String) {
+                runOnUiThread {
+                    rtspServer.stop()
+                    server.stop()
+                    setError("4K H.264: " + message)
+                    updateConnectionStatus(0)
+                    streamButton.text = "Iniciar transmissão"
+                    streamButton.setBackgroundResource(
+                        R.drawable.bg_button_primary
+                    )
+                    streamButton.backgroundTintList = null
+                    streamButton.setTextColor(
+                        ContextCompat.getColor(
+                            this@MainActivity,
+                            R.color.black
+                        )
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        message,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    startCamera()
+                }
+            }
+
+            override fun onStopped() = Unit
         })
     }
 
@@ -424,7 +506,15 @@ class MainActivity : AppCompatActivity() {
         val label: String,
         val size: Size,
         val highResolution: Boolean,
-        val directHevc: Boolean
+        val directHevc: Boolean,
+        val directH264: Boolean = false,
+        val overrideLogicalCameraId: String? = null,
+        val overridePhysicalCameraId: String? = null
+    )
+
+    private data class DirectCameraSource(
+        val logicalCameraId: String,
+        val physicalCameraId: String?
     )
 
     private fun resolutionKey(size: Size): String =
@@ -458,6 +548,129 @@ class MainActivity : AppCompatActivity() {
         val aspect = landscape.width.toFloat() / landscape.height.toFloat()
         val target = 16f / 9f
         return kotlin.math.abs(aspect - target) <= 0.03f
+    }
+
+    private fun find8kCameraSource(
+        manager: CameraManager
+    ): DirectCameraSource? {
+        val target = Size(7680, 4320)
+        if (!hevcDirectStreamer.supports(target.width, target.height, 10)) {
+            return null
+        }
+
+        var sensorFallback: DirectCameraSource? = null
+
+        manager.cameraIdList.forEach { logicalId ->
+            val logicalChars = runCatching {
+                manager.getCameraCharacteristics(logicalId)
+            }.getOrNull() ?: return@forEach
+
+            if (
+                logicalChars.get(CameraCharacteristics.LENS_FACING) !=
+                    CameraCharacteristics.LENS_FACING_BACK
+            ) {
+                return@forEach
+            }
+
+            val physicalIds =
+                if (Build.VERSION.SDK_INT >= 28) {
+                    logicalChars.physicalCameraIds.toList()
+                } else {
+                    emptyList()
+                }
+
+            val candidates =
+                listOf<String?>(null) + physicalIds.map { it }
+
+            candidates.forEach { physicalId ->
+                val chars = runCatching {
+                    manager.getCameraCharacteristics(
+                        physicalId ?: logicalId
+                    )
+                }.getOrNull() ?: return@forEach
+
+                val map = chars.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                )
+
+                val advertised = mutableListOf<Size>()
+                fun addSizes(sizes: Array<Size>?) {
+                    sizes.orEmpty().forEach { advertised.add(it) }
+                }
+
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.media.MediaCodec::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.media.MediaRecorder::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getOutputSizes(
+                            android.graphics.SurfaceTexture::class.java
+                        )
+                    )
+                }
+                runCatching {
+                    addSizes(
+                        map?.getHighResolutionOutputSizes(
+                            ImageFormat.YUV_420_888
+                        )
+                    )
+                }
+
+                val exact = advertised.any {
+                    canonicalLandscapeSize(it) == target
+                }
+                if (exact) {
+                    return DirectCameraSource(
+                        logicalCameraId = logicalId,
+                        physicalCameraId = physicalId
+                    )
+                }
+
+                if (sensorFallback == null) {
+                    val pixel = chars.get(
+                        CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
+                    )
+                    val active = chars.get(
+                        CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+                    )
+                    val sensorWidth = maxOf(
+                        pixel?.width ?: 0,
+                        active?.width() ?: 0
+                    )
+                    val sensorHeight = maxOf(
+                        pixel?.height ?: 0,
+                        active?.height() ?: 0
+                    )
+                    val landscapeWidth =
+                        maxOf(sensorWidth, sensorHeight)
+                    val landscapeHeight =
+                        minOf(sensorWidth, sensorHeight)
+
+                    if (
+                        landscapeWidth >= target.width &&
+                        landscapeHeight >= target.height
+                    ) {
+                        sensorFallback = DirectCameraSource(
+                            logicalCameraId = logicalId,
+                            physicalCameraId = physicalId
+                        )
+                    }
+                }
+            }
+        }
+
+        return sensorFallback
     }
 
     private data class CameraLensOption(

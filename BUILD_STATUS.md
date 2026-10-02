@@ -536,3 +536,18 @@ Branch: `build-13-goat-cam`
 - o preview local antes da transmissão continua leve; durante a transmissão 8K a prioridade é a surface direta do encoder;
 - troca entre o pipeline normal e o pipeline HEVC interrompe a transmissão ativa antes de reconfigurar a câmera, evitando disputa de surface/câmera;
 - nenhuma APK foi gerada automaticamente nesta etapa.
+
+
+### APK de teste — Build 13
+- workflow: Android Debug APK;
+- run: 37044411877 (#23);
+- conclusão: success;
+- branch: `build-13-goat-cam`;
+- head commit da execução: `2065b07714bbe3b45a878af85193f2c7ddf52650`;
+- artifact: `goat-cam-build-13-debug`;
+- artifact id: 11244126968;
+- artifact digest: `sha256:07037369da805d06a7ee432053ca36dede429de27e022a4d8f09d083107a036a`;
+- APK gerado: `app-debug.apk`;
+- tamanho do APK: 4.850.280 bytes;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: múltiplas lentes, resoluções dinâmicas, 2K/4K corrigidos e 8K HEVC experimental adaptável.

@@ -93,7 +93,7 @@ class HevcDirectStreamer(
         physicalCameraId: String?,
         width: Int,
         height: Int,
-        fps: Int = 24,
+        fps: Int = 10,
         bitrate: Int = recommendedBitrate(width, height, fps)
     ): Boolean {
         synchronized(lock) {

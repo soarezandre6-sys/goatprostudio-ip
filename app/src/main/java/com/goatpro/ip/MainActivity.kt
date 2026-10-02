@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private var autoDiscoveryEnabled = true
     private var backgroundStreamingEnabled = true
     private var backgroundHeadless = false
+    private var backgroundDirectActive = false
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
     private var fallbackResolutionAfterFront4kFailure: ResolutionOption? = null
@@ -180,15 +181,19 @@ class MainActivity : AppCompatActivity() {
         RtspH264Server(8554, object : RtspH264Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
-                    if (
+                    when {
+                        backgroundH264Streamer.isRunning() ||
+                            backgroundH264Streamer.isStarting() ->
+                            backgroundH264Streamer.requestKeyFrame()
                         front4kDirectStreamer.isRunning() ||
-                        front4kDirectStreamer.isStarting()
-                    ) {
-                        front4kDirectStreamer.requestKeyFrame()
-                    } else {
-                        h264Encoder.requestKeyFrame()
+                            front4kDirectStreamer.isStarting() ->
+                            front4kDirectStreamer.requestKeyFrame()
+                        else -> h264Encoder.requestKeyFrame()
                     }
-                } else if (!front4kDirectStreamer.isRunning()) {
+                } else if (
+                    !front4kDirectStreamer.isRunning() &&
+                    !backgroundH264Streamer.isRunning()
+                ) {
                     h264Encoder.stop()
                 }
                 runOnUiThread { updateConnectionStatus(server.videoClientCount()) }
@@ -212,6 +217,55 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         })
+    }
+
+    private val backgroundH264Streamer:
+        BackgroundH264Streamer by lazy {
+        BackgroundH264Streamer(
+            this,
+            object : BackgroundH264Streamer.Listener {
+                override fun onAccessUnit(
+                    data: ByteArray,
+                    presentationTimeUs: Long,
+                    keyFrame: Boolean,
+                    codecConfig: Boolean
+                ) {
+                    rtspServer.onAccessUnit(
+                        data,
+                        presentationTimeUs,
+                        keyFrame,
+                        codecConfig
+                    )
+                }
+
+                override fun onStarted(
+                    width: Int,
+                    height: Int,
+                    fps: Int,
+                    bitrate: Int
+                ) {
+                    backgroundDirectActive = true
+                }
+
+                override fun onError(message: String) {
+                    runOnUiThread {
+                        backgroundDirectActive = false
+                        if (
+                            backgroundHeadless &&
+                            isStreamingActive() &&
+                            !selectedResolution.directFront4k
+                        ) {
+                            // Safe fallback: keep streaming with ImageAnalysis only.
+                            startCamera()
+                        }
+                    }
+                }
+
+                override fun onStopped() {
+                    backgroundDirectActive = false
+                }
+            }
+        )
     }
 
     private val front4kDirectStreamer:
@@ -251,7 +305,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                         performanceText.text =
-                            "4K frontal direto • H.264 hardware • " +
+                            "4K frontal Camera1/MediaRecorder • H.264 • " +
                                 fps + " FPS • " +
                                 String.format(
                                     java.util.Locale.US,
@@ -434,7 +488,9 @@ class MainActivity : AppCompatActivity() {
             if (
                 server.isRunning() ||
                 front4kDirectStreamer.isRunning() ||
-                front4kDirectStreamer.isStarting()
+                front4kDirectStreamer.isStarting() ||
+                backgroundH264Streamer.isRunning() ||
+                backgroundH264Streamer.isStarting()
             ) {
                 stopStreaming()
             } else {
@@ -1569,25 +1625,91 @@ class MainActivity : AppCompatActivity() {
         StreamingCameraLifecycle.setActive(true)
         startStreamingForegroundService()
 
-        // The dedicated 4K front recorder owns its Camera2/MediaRecorder surface
-        // and does not depend on PreviewView, so do not disturb that session.
+        // The dedicated front 4K recorder is already UI-independent.
         if (selectedResolution.directFront4k) return
+        if (backgroundHeadless) return
 
-        // Normal CameraX streaming used to keep PreviewView bound. When Android
-        // destroys the visible Surface after Home/screen-off, Samsung can stall
-        // the whole camera session. Rebind only ImageAnalysis while hidden.
-        if (!backgroundHeadless) {
-            backgroundHeadless = true
+        backgroundHeadless = true
+
+        val option = selectedCameraOption
+        val useDirectRtsp =
+            option != null &&
+            rtspServer.activeClientCount() > 0 &&
+            server.videoClientCount() == 0 &&
+            selectedResolution.size.width <= 1920 &&
+            selectedResolution.size.height <= 1080
+
+        if (!useDirectRtsp) {
+            // MJPEG or higher-resolution fallback still needs ImageAnalysis.
             startCamera()
+            return
         }
+
+        val zoom = currentCamera?.cameraInfo?.zoomState?.value?.zoomRatio
+            ?: option.zoomRatio
+            ?: 1f
+        val targetFps =
+            (if (streamTargetFps > 0) streamTargetFps else 20).coerceIn(10, 30)
+        val targetBitrate = if (streamBitrateBps > 0) {
+            streamBitrateBps
+        } else {
+            H264Encoder.recommendedBitrate(
+                selectedResolution.size.width,
+                selectedResolution.size.height,
+                targetFps,
+                streamJpegQuality
+            )
+        }
+
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            if (!backgroundHeadless || !isStreamingActive()) return@addListener
+            try {
+                val provider = providerFuture.get()
+                provider.unbindAll()
+                previewUseCase = null
+                analysisUseCase = null
+                currentCamera = null
+                h264Encoder.stop()
+
+                val started = backgroundH264Streamer.start(
+                    logicalCameraId = option.logicalCameraId,
+                    physicalCameraId = option.physicalCameraId,
+                    targetWidth = selectedResolution.size.width,
+                    targetHeight = selectedResolution.size.height,
+                    targetFps = targetFps,
+                    targetBitrate = targetBitrate,
+                    targetZoomRatio = zoom
+                )
+                backgroundDirectActive = started
+                if (!started) {
+                    startCamera()
+                }
+            } catch (_: Exception) {
+                backgroundDirectActive = false
+                startCamera()
+            }
+        }, ContextCompat.getMainExecutor(this))
     }
 
     private fun exitBackgroundCaptureMode() {
-        if (!backgroundHeadless) return
+        val wasHeadless = backgroundHeadless
         backgroundHeadless = false
 
-        // Restore Preview + ImageAnalysis without touching MJPEG/RTSP servers.
-        if (isStreamingActive() && !selectedResolution.directFront4k) {
+        if (
+            backgroundDirectActive ||
+            backgroundH264Streamer.isRunning() ||
+            backgroundH264Streamer.isStarting()
+        ) {
+            backgroundH264Streamer.stop()
+            backgroundDirectActive = false
+        }
+
+        if (
+            wasHeadless &&
+            isStreamingActive() &&
+            !selectedResolution.directFront4k
+        ) {
             startCamera()
         }
     }
@@ -1602,6 +1724,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
+        if (
+            backgroundH264Streamer.isRunning() ||
+            backgroundH264Streamer.isStarting()
+        ) return
+
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             val provider = providerFuture.get()
@@ -2843,7 +2970,9 @@ class MainActivity : AppCompatActivity() {
         server.isRunning() ||
             rtspServer.isRunning() ||
             front4kDirectStreamer.isRunning() ||
-            front4kDirectStreamer.isStarting()
+            front4kDirectStreamer.isStarting() ||
+            backgroundH264Streamer.isRunning() ||
+            backgroundH264Streamer.isStarting()
 
     private fun startStreamingForegroundService() {
         if (!backgroundStreamingEnabled) return
@@ -2977,6 +3106,8 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        backgroundH264Streamer.stop()
+        backgroundDirectActive = false
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()
@@ -3170,6 +3301,8 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
+        backgroundH264Streamer.stop()
+        backgroundDirectActive = false
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()

@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var torchButton: Button
     private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
+    private lateinit var vendorDiagnosticButton: Button
+    private lateinit var vendorDiagnosticText: TextView
     private lateinit var websiteButton: Button
     private lateinit var cameraLensSpinner: Spinner
     private lateinit var resolutionSpinner: Spinner
@@ -588,6 +590,10 @@ class MainActivity : AppCompatActivity() {
         torchButton = findViewById(R.id.torchButton)
         audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
+        vendorDiagnosticButton =
+            findViewById(R.id.vendorDiagnosticButton)
+        vendorDiagnosticText =
+            findViewById(R.id.vendorDiagnosticText)
         websiteButton = findViewById(R.id.websiteButton)
         cameraLensSpinner = findViewById(R.id.cameraLensSpinner)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
@@ -628,12 +634,83 @@ class MainActivity : AppCompatActivity() {
         torchButton.setOnClickListener { toggleTorch() }
         audioButton.setOnClickListener { toggleAudio() }
         copyAddressButton.setOnClickListener { copyAddressToClipboard() }
+        vendorDiagnosticButton.setOnClickListener {
+            runVendor8kDiagnostic()
+        }
         websiteButton.setOnClickListener { openGoatProStudioWebsite() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun runVendor8kDiagnostic() {
+        vendorDiagnosticButton.isEnabled = false
+        vendorDiagnosticText.text =
+            "Lendo Camera2, session keys e vendor tags…"
+        performanceText.text =
+            "Diagnóstico Samsung 8K em andamento…"
+
+        cameraExecutor.execute {
+            try {
+                val report =
+                    SamsungVendorDiagnostics(this).scan()
+
+                val clipboard =
+                    getSystemService(
+                        Context.CLIPBOARD_SERVICE
+                    ) as ClipboardManager
+                clipboard.setPrimaryClip(
+                    ClipData.newPlainText(
+                        "GOAT Cam - Diagnóstico 8K Samsung",
+                        report.fullText
+                    )
+                )
+
+                runCatching {
+                    java.io.File(
+                        filesDir,
+                        "goat-camera-vendor-report.txt"
+                    ).writeText(report.fullText)
+                }
+
+                runOnUiThread {
+                    vendorDiagnosticButton.isEnabled = true
+                    vendorDiagnosticText.text =
+                        report.summary +
+                            " • relatório completo copiado"
+                    performanceText.text =
+                        "Vendor diagnostic: " +
+                            report.vendorKeyCount +
+                            " vendor • " +
+                            report.matchedKeyCount +
+                            " relacionadas • " +
+                            report.cameraCount +
+                            " câmeras"
+                    Toast.makeText(
+                        this,
+                        "Diagnóstico 8K copiado. Cole o relatório no ChatGPT.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (ex: Exception) {
+                runOnUiThread {
+                    vendorDiagnosticButton.isEnabled = true
+                    vendorDiagnosticText.text =
+                        "Falha no diagnóstico: " +
+                            (
+                                ex.message
+                                    ?: ex.javaClass.simpleName
+                                )
+                    Toast.makeText(
+                        this,
+                        "Não foi possível ler o diagnóstico 8K.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 

@@ -1,0 +1,26 @@
+name: Build 26 Maintenance
+
+on:
+  push:
+    branches: [ build-26-goat-cam ]
+    paths:
+      - ".github/build-26-maintenance.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Build 26 integration
+        run: python tools/build26_integrate.py
+      - name: Validate and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt BUILD_26_STATUS.md
+          git diff --cached --check
+          git commit -m "Build 26: integrar 4K frontal legado e segundo plano leve"
+          git push

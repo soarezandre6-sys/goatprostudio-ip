@@ -665,3 +665,19 @@ Branch: `build-18-goat-cam`
 - detecta NALs HEVC IRAP para marcar keyframes;
 - o fallback automático para a resolução anterior continua ativo se o MediaRecorder/sessão 8K for recusado;
 - nenhuma APK da Build 18 foi gerada nesta etapa.
+
+
+### APK de teste — Build 18
+- workflow: Android Debug APK;
+- run: 37057566504 (#29);
+- conclusão: success;
+- branch: `build-18-goat-cam`;
+- head commit da execução: `71f1ccd820ec9ad308685d2e135c4d0500881437`;
+- artifact: `goat-cam-build-18-debug`;
+- artifact id: 11249181105;
+- artifact digest: `sha256:dfce2ecdd0914aa5f5b8fe6b40e6ef4e8e489e330f22394338e38bd734a695a9`;
+- APK: `GOAT-Cam-Build-18-Teste.apk`;
+- tamanho do APK: 4.866.664 bytes;
+- APK SHA-256: `7d96b38fff78ba17a31bdf0f266e14c915d040ab7e9f417a19e16909cfdbcb37`;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: validar 8K via MediaRecorder + HEVC + Surface de gravação, preservando 4K e tele.

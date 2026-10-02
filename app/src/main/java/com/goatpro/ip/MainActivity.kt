@@ -107,6 +107,8 @@ class MainActivity : AppCompatActivity() {
     private var autoDiscoveryEnabled = true
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
+    private var fallbackResolutionAfterHevcFailure: ResolutionOption? = null
+    private var autoRestartStreamAfterCameraBind = false
 
     private var metricsWindowStartedNs = 0L
     private var analysisFrameCount = 0
@@ -262,8 +264,48 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     hevcRtspServer.stop()
                     server.stop()
-                    setError("8K HEVC: " + message)
                     updateConnectionStatus(0)
+
+                    val fallback = fallbackResolutionAfterHevcFailure
+                    if (fallback != null) {
+                        fallbackResolutionAfterHevcFailure = null
+                        selectedResolution = fallback
+                        applyHighResolutionDefaults(fallback)
+
+                        if (::resolutionSpinner.isInitialized) {
+                            val index =
+                                availableResolutionOptions.indexOfFirst {
+                                    it.key == fallback.key
+                                }
+                            if (index >= 0) {
+                                resolutionSpinner.setSelection(index)
+                            }
+                        }
+
+                        actualStreamWidth = 0
+                        actualStreamHeight = 0
+                        nextEncodeDueNs = 0L
+                        resetPerformanceStats()
+                        updateStreamInfo()
+                        refreshAddress()
+
+                        setError(
+                            "8K recusado pela câmera • restaurando " +
+                                fallback.label
+                        )
+                        Toast.makeText(
+                            this@MainActivity,
+                            "8K recusado. Voltando automaticamente para " +
+                                fallback.label + ".",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        autoRestartStreamAfterCameraBind = true
+                        startCamera()
+                        return@runOnUiThread
+                    }
+
+                    setError("8K HEVC: " + message)
                     streamButton.text = "Iniciar transmissão"
                     streamButton.setBackgroundResource(
                         R.drawable.bg_button_primary
@@ -1244,7 +1286,18 @@ class MainActivity : AppCompatActivity() {
 
         val transportModeChanged =
             option.directHevc != selectedResolution.directHevc
-        if (transportModeChanged && server.isRunning()) {
+        val wasStreaming = server.isRunning()
+
+        if (
+            option.directHevc &&
+            !selectedResolution.directHevc &&
+            wasStreaming
+        ) {
+            fallbackResolutionAfterHevcFailure = selectedResolution
+        }
+
+        if (transportModeChanged && wasStreaming) {
+            autoRestartStreamAfterCameraBind = true
             stopStreaming()
         }
 
@@ -1486,6 +1539,11 @@ class MainActivity : AppCompatActivity() {
                     torchEnabled = false
                     updateTorchButton()
                     if (!server.isRunning()) setReadyState()
+
+                    if (autoRestartStreamAfterCameraBind) {
+                        autoRestartStreamAfterCameraBind = false
+                        startStreaming()
+                    }
                 } catch (_: Exception) {
                     previewUseCase = null
                     analysisUseCase = null
@@ -1681,6 +1739,11 @@ class MainActivity : AppCompatActivity() {
                 torchEnabled = false
                 updateTorchButton()
                 if (!server.isRunning()) setReadyState()
+
+                if (autoRestartStreamAfterCameraBind) {
+                    autoRestartStreamAfterCameraBind = false
+                    startStreaming()
+                }
             } catch (_: Exception) {
                 previewUseCase = null
                 analysisUseCase = null

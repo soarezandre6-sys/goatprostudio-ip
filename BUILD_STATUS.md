@@ -632,3 +632,19 @@ Branch: `build-17-goat-cam`
 - mantém `TEMPLATE_RECORD`, `CONTROL_CAPTURE_INTENT_VIDEO_RECORD` e stream use case VIDEO_RECORD;
 - fallback automático para a resolução anterior continua ativo se a sessão 8K for recusada;
 - nenhuma APK da Build 17 foi gerada nesta etapa.
+
+
+### APK de teste — Build 17
+- workflow: Android Debug APK;
+- run: 37055986009 (#28);
+- conclusão: success;
+- branch: `build-17-goat-cam`;
+- head commit da execução: `e723d7265a4c1c5e50e20ed95b564b661e194624`;
+- artifact: `goat-cam-build-17-debug`;
+- artifact id: 11247798437;
+- artifact digest: `sha256:895c213548f36d3bd370f1966df6d245c868db87d040e8b36d915faa93de4aa8`;
+- APK: `GOAT-Cam-Build-17-Teste.apk`;
+- tamanho do APK: 4.866.664 bytes;
+- APK SHA-256: `750b6c5e188e9245f5a5906e9ab94287a1c5da5b1ee4488d6a7edc80670876a1`;
+- compilação `:app:assembleDebug`: sucesso;
+- objetivo do teste: validar 8K via PRIVATE + USECASE_RECORD + perfil QUALITY_8KUHD, preservando 4K e tele.

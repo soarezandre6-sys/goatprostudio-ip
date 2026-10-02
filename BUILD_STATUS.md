@@ -519,5 +519,20 @@ Branch: `build-13-goat-cam`
 - a lista é recalculada sempre que o usuário troca entre principal, ultra-wide, tele e frontal;
 - o painel web recebe exatamente a mesma lista dinâmica do aplicativo;
 - aliases antigos HD/FHD/QHD/UHD continuam aceitos nos comandos remotos para compatibilidade;
-- o teto desta versão permanece 4K (3840×2160); resoluções acima disso, como 8K, não são oferecidas ainda;
+- 8K passa a ser oferecido somente quando a câmera anunciar saída compatível para `MediaCodec` e o encoder HEVC do aparelho aceitar a resolução;
 - formatos pequenos e formatos fora de 16:9 são ocultados porque não correspondem ao pipeline de vídeo atual do GOAT Cam.
+
+### 8K experimental adaptável — atualização adicional da Build 13
+- checkpoint preservado antes desta mudança: `checkpoint-build13-pre-8k-2026-10-02`;
+- 720p/1080p/2K/4K continuam usando o pipeline existente CameraX + ImageAnalysis + MJPEG/H.264;
+- resoluções acima de 4K usam um caminho separado para não sobrecarregar NV21/JPEG;
+- o app consulta `StreamConfigurationMap.getOutputSizes(MediaCodec::class.java)` para descobrir tamanhos de vídeo privados compatíveis com encoder;
+- uma opção como `8K UHD · HEVC experimental · 7680×4320` só aparece se a câmera realmente anunciar esse tamanho e o encoder HEVC/H.265 do aparelho também aceitar a resolução;
+- modo 8K usa Camera2 direto para a surface de entrada do `MediaCodec`, evitando conversão de cada quadro 8K para NV21/JPEG pela CPU;
+- encoder 8K padrão configurado para HEVC/H.265 por hardware, 24 FPS e bitrate adaptado (aprox. 45 Mbps em 7680×4320/24);
+- RTSP H.265 experimental adicionado na porta 8554, caminho `/h265`;
+- descoberta automática mantém os campos antigos para compatibilidade e passa a anunciar também `h265=/h265` e `rtspCodec=H264|H265`;
+- ao iniciar 8K, CameraX libera a câmera e o Camera2 assume a captura direta; ao parar, o preview CameraX volta;
+- o preview local antes da transmissão continua leve; durante a transmissão 8K a prioridade é a surface direta do encoder;
+- troca entre o pipeline normal e o pipeline HEVC interrompe a transmissão ativa antes de reconfigurar a câmera, evitando disputa de surface/câmera;
+- nenhuma APK foi gerada automaticamente nesta etapa.

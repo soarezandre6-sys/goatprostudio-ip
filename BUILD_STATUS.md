@@ -479,3 +479,34 @@ Branch: `release-1.0.0-goat-cam`
 - package ID preservado: com.goatpro.ip;
 - targetSdk/compileSdk: 36;
 - versionCode 100 / versionName 1.0.0.
+
+
+## Build 13 — correção crítica 2K/4K + tele
+Branch: `build-13-goat-cam`
+
+### Problemas encontrados no teste da 1.0.0
+- Galaxy S21 não exibia 4K no seletor;
+- 2K podia falhar/travar ao abrir a câmera;
+- câmera tele não aparecia entre as lentes disponíveis.
+
+### Causas corrigidas
+- o seletor de lentes descartava câmeras traseiras lógicas quando encontrava câmeras físicas em uma câmera lógica multi-camera;
+- a tele podia existir como câmera lógica separada e, por isso, era ignorada;
+- a detecção de resolução consultava somente `getOutputSizes(YUV_420_888)` e não considerava `getHighResolutionOutputSizes(YUV_420_888)`;
+- o CameraX permanecia no modo padrão `PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION`, que pode excluir resoluções de alta resolução;
+- Preview e ImageAnalysis recebiam simultaneamente a mesma resolução 2K/4K, combinação que alguns HALs rejeitam ou executam de forma instável.
+
+### Alterações da Build 13
+- união de câmeras traseiras lógicas + câmeras físicas expostas pelo Camera2;
+- remoção de duplicatas por métrica de campo de visão, preferindo câmera lógica diretamente acessível quando representa a mesma lente;
+- classificação de tele mais tolerante para aparelhos em que a lente tele tem campo de visão próximo da principal;
+- consulta combinada das resoluções YUV normais e de alta resolução da câmera física e da câmera lógica associada;
+- CameraX passa a usar `PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE` em 2K/4K;
+- transmissão/análise continua pedindo a resolução 2K/4K selecionada;
+- preview local fica limitado a 720p nos modos 2K/4K para reduzir a carga e evitar duas superfícies de alta resolução simultâneas;
+- 720p/1080p mantêm o comportamento normal de prioridade de FPS.
+
+### Estado
+- alterações salvas no GitHub;
+- nenhuma APK foi gerada nesta etapa;
+- próxima validação deve ser feita no Galaxy S21, conferindo: principal, ultra-wide, tele, frontal, 2K e 4K.

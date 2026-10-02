@@ -552,3 +552,19 @@ Branch: `build-13-goat-cam`
 - APK SHA-256: `ced82fbe9d86fd6af62f3f8b9eaa428a790ebaafcecdc7676438c83faf149196`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: múltiplas lentes, resoluções dinâmicas, 2K/4K corrigidos e 8K HEVC experimental adaptável.
+
+
+## Build 15 — correção após regressões da Build 14
+Branch: `build-15-goat-cam`
+
+- criada a partir do checkpoint da Build 13 que já havia sido validado com 4K funcionando;
+- o pipeline H.264 direto introduzido na Build 14 foi removido desta linha; 4K volta ao caminho CameraX/ImageAnalysis/H.264 que funcionou no Galaxy S21;
+- seletor de resolução deixa de listar tamanhos intermediários de sensor como substitutos de 8K; 8K significa somente `7680×4320`;
+- 8K experimental usa 10 FPS como tentativa inicial;
+- no Galaxy S21, o app não esconde mais a opção 8K apenas porque a tabela pública do MediaCodec/HAL não anuncia 7680×4320;
+- o encoder HEVC tenta configurar exatamente `7680×4320` e deixa o hardware aceitar ou recusar a sessão real;
+- enumeração das câmeras traseiras não remove mais módulos diferentes apenas porque suas distâncias focais são parecidas;
+- câmeras físicas são deduplicadas por identidade/ID, preservando principal, ultra-wide e tele quando o Camera2 as expõe;
+- quando a tele não aparece como ID físico, mas a câmera lógica suporta zoom de pelo menos 3x, o seletor adiciona `Tele • 3x` e solicita zoom ao HAL para permitir que a Samsung faça a troca interna de sensor;
+- para a família Galaxy S21 `SM-G99x`, a busca 8K também considera o maior sensor traseiro como fallback experimental, porque o app nativo oferece 8K mesmo quando a API pública pode subdeclarar os modos;
+- nenhuma APK foi gerada nesta etapa.

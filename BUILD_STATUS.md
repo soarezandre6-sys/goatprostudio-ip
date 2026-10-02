@@ -747,3 +747,21 @@ Branch: `build-20-goat-cam`
 - APK SHA-256: `0ce04e895a7ff767ace23ccd0e8c2f39b86441b7873038c45e783fbfb367cf43`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: executar `Diagnóstico 8K Samsung`, copiar o relatório completo e analisar vendor/session keys expostas pelo aparelho.
+
+
+## Build 21 — teste local oficial 8K
+Branch: `build-21-goat-cam`
+
+- criada a partir da Build 20;
+- novo botão `Teste local 8K oficial (5 s)`;
+- usa o perfil clássico `CamcorderProfile.QUALITY_8KUHD`;
+- exige que o perfil reportado seja exatamente `7680×4320`;
+- aplica o perfil completo com `MediaRecorder.setProfile(profile)`;
+- grava em arquivo local normal no próprio celular, sem RTSP, sem pipe e sem CameraX;
+- usa `CameraDevice.TEMPLATE_RECORD` e stream use case de vídeo quando disponível;
+- grava por 5 segundos e finaliza automaticamente;
+- após finalizar, lê o arquivo com `MediaMetadataRetriever` para confirmar a resolução real gravada;
+- só mostra `8K LOCAL ACEITO • 7680×4320` se o arquivo final também for 8K real;
+- o arquivo de sucesso fica em armazenamento específico do app, pasta Movies/GOAT-Cam;
+- 4K, tele e diagnóstico vendor da Build 20 foram preservados;
+- APK ainda não gerado nesta etapa.

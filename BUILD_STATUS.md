@@ -681,3 +681,33 @@ Branch: `build-18-goat-cam`
 - APK SHA-256: `7d96b38fff78ba17a31bdf0f266e14c915d040ab7e9f417a19e16909cfdbcb37`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: validar 8K via MediaRecorder + HEVC + Surface de gravação, preservando 4K e tele.
+
+
+## Build 19 — 8K via CameraX VideoCapture/Recorder
+Branch: `build-19-goat-cam`
+
+- criada a partir da Build 18;
+- 4K e tele preservados;
+- adicionada dependência `androidx.camera:camera-video:1.5.1`;
+- modo 8K usa `Recorder` com `Quality.HIGHEST` e `VIDEO_CAPABILITIES_SOURCE_CAMCORDER_PROFILE`;
+- o próprio CameraX negocia a sessão de vídeo com a HAL;
+- após o bind, `VideoCapture.getResolutionInfo()` é validado;
+- somente `7680×4320` é aceito como sucesso de 8K; qualquer fallback para 4K/FHD é reportado como recusa;
+- se 7680×4320 for negociado, o Recorder inicia uma gravação de teste no cache para confirmar que a sessão realmente começou;
+- arquivo de teste é temporário e removido ao parar/finalizar;
+- fallback automático para 4K continua ativo em caso de recusa;
+- esta Build 19 valida aceitação real do 8K pelo CameraX; o caminho RTSP 8K ainda não é usado neste teste.
+
+### APK de teste — Build 19
+- workflow: Android Debug APK;
+- run: 37059094320 (#30);
+- conclusão: success;
+- branch: `build-19-goat-cam`;
+- head commit da execução: `a68bf7a6c0782f35b945da7cebb49d2285c7c5fd`;
+- artifact: `goat-cam-build-19-debug`;
+- artifact id: 11249217725;
+- artifact digest: `sha256:3ee18edf20e44c59a8d89586e2d1a05f4d617bfaafb49755ffece65157be3377`;
+- APK: `GOAT-Cam-Build-19-Teste.apk`;
+- tamanho do APK: 4.883.048 bytes;
+- APK SHA-256: `9097fda6d454f45df8a5d0a162e964fbfd4bcf696295ef4d8d54c8e9a031e70a`;
+- compilação `:app:assembleDebug`: sucesso.

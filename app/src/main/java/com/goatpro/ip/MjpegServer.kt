@@ -271,13 +271,8 @@ class MjpegServer(
                     <div class="muted" style="color:#F2B620;font-weight:bold;margin-bottom:6px">TRANSMISSÃO / GOAT PRO STUDIO</div>
 
                     <label>Resolução</label>
-                    <select id="resolution" onchange="cmd('resolution',this.value)">
-                      <option value="HD">720p</option>
-                      <option value="FHD">1080p</option>
-                      <option value="QHD">2K / 1440p · experimental</option>
-                      <option value="UHD">4K / 2160p · experimental</option>
-                    </select>
-                    <div class="rangeLimits" id="resolutionSupport">Verificando resoluções suportadas…</div>
+                    <select id="resolution" onchange="cmd('resolution',this.value)"></select>
+                    <div class="rangeLimits" id="resolutionSupport">Lendo resoluções reais desta câmera…</div>
 
                     <label>Preset rápido</label>
                     <select id="quality" onchange="cmd('quality',this.value)">
@@ -473,18 +468,23 @@ class MjpegServer(
                       : (rows.length===1?'1 câmera/lente disponível':'Nenhuma lente adicional exposta');
                 }
 
-                function applyResolutionSupport(csv,current){
-                  const supported=String(csv||'').split(',').map(v=>v.trim()).filter(Boolean);
+                function applyResolutionOptions(csv,current){
                   const select=document.getElementById('resolution');
-                  Array.from(select.options).forEach(o=>{
-                    o.disabled=!supported.includes(o.value);
+                  const rows=String(csv||'').split(';').map(v=>v.trim()).filter(Boolean);
+                  select.innerHTML='';
+                  rows.forEach(row=>{
+                    const sep=row.indexOf('|');
+                    const key=sep>=0?row.slice(0,sep):row;
+                    const label=sep>=0?row.slice(sep+1):row;
+                    const option=document.createElement('option');
+                    option.value=key;
+                    option.textContent=label;
+                    select.appendChild(option);
                   });
-                  if(supported.includes(current)) select.value=current;
+                  if(current) select.value=current;
                   document.getElementById('resolutionSupport').textContent=
-                    supported.length
-                      ? 'Disponível nesta câmera: '+supported.map(v=>({
-                          HD:'720p',FHD:'1080p',QHD:'2K',UHD:'4K'
-                        }[v]||v)).join(' · ')
+                    rows.length
+                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · limite atual do GOAT Cam: 4K'
                       : 'Não foi possível ler as resoluções da câmera';
                 }
 
@@ -585,9 +585,9 @@ class MjpegServer(
                       s.cameraOptionsCsv||'',
                       s.cameraKey||''
                     );
-                    applyResolutionSupport(
-                      s.supportedResolutionsCsv||'HD,FHD',
-                      s.resolution||'FHD'
+                    applyResolutionOptions(
+                      s.resolutionOptionsCsv||'1280x720|HD · 1280×720;1920x1080|Full HD · 1920×1080',
+                      s.resolution||'1920x1080'
                     );
                     document.getElementById('quality').value=s.quality||'BALANCED';
                     const jq=document.getElementById('jpegQuality');

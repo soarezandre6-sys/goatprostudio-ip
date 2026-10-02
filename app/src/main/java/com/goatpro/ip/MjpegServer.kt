@@ -300,6 +300,30 @@ class MjpegServer(
                            onchange="cmd('fpsLimit',this.value)">
                     <div class="rangeLimits">0 = sem limite · útil para medir o máximo real do aparelho</div>
 
+                    <label class="rangeHead">
+                      <span>Bitrate H.264</span>
+                      <span class="rangeValue" id="bitrateText">Automático</span>
+                    </label>
+                    <input id="bitrateKbps" type="range" min="0" max="60000" step="500" value="0"
+                           oninput="bitrateText.textContent=(this.value==='0'?'Automático':(Number(this.value)/1000).toFixed(1)+' Mbps')"
+                           onchange="cmd('bitrateKbps',this.value)">
+                    <div class="rangeLimits">0 = automático · no 4K frontal é aplicado ao reiniciar o stream</div>
+
+                    <div class="muted" style="color:#F2B620;font-weight:bold;margin-top:16px;margin-bottom:6px">RECURSOS PRO EM TESTE</div>
+                    <label><input id="watermarkEnabled" type="checkbox" onchange="cmd('watermark',this.checked?'1':'0')"> Marca d'água GOAT CAM FREE</label>
+                    <div class="rangeLimits">No produto final, a versão Free mantém a marca; o Pro remove.</div>
+                    <div class="row" style="margin-top:8px">
+                      <button onclick="cmd('savePreset','1')">Salvar P1</button>
+                      <button onclick="cmd('savePreset','2')">Salvar P2</button>
+                      <button onclick="cmd('savePreset','3')">Salvar P3</button>
+                    </div>
+                    <div class="row">
+                      <button class="secondary" onclick="cmd('loadPreset','1')">Carregar P1</button>
+                      <button class="secondary" onclick="cmd('loadPreset','2')">Carregar P2</button>
+                      <button class="secondary" onclick="cmd('loadPreset','3')">Carregar P3</button>
+                    </div>
+                    <div class="rangeLimits">Smart Link lembra automaticamente câmera, resolução, qualidade, FPS, bitrate, rotação e marca d'água.</div>
+
                     <label>Rotação da imagem</label>
                     <select id="rotation" onchange="cmd('rotation',this.value)">
                       <option value="AUTO">Automático</option>
@@ -484,7 +508,7 @@ class MjpegServer(
                   if(current) select.value=current;
                   document.getElementById('resolutionSupport').textContent=
                     rows.length
-                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera · 8K experimental tenta 7680×4320 exatos em aparelhos compatíveis'
+                      ? rows.length+' resolução(ões) de vídeo disponíveis nesta câmera'
                       : 'Não foi possível ler as resoluções da câmera';
                 }
 
@@ -597,6 +621,11 @@ class MjpegServer(
                     fl.value=Number(s.targetFps||0);
                     document.getElementById('fpsLimitText').textContent=
                       Number(s.targetFps||0)<=0?'Sem limite':Math.round(Number(s.targetFps))+' FPS';
+                    const br=document.getElementById('bitrateKbps');
+                    br.value=Number(s.bitrateKbps||0);
+                    document.getElementById('bitrateText').textContent=
+                      Number(s.bitrateKbps||0)<=0?'Automático':(Number(s.bitrateKbps)/1000).toFixed(1)+' Mbps';
+                    document.getElementById('watermarkEnabled').checked=!!s.watermarkEnabled;
                     document.getElementById('rotation').value=s.rotation||'AUTO';
                     document.getElementById('autoDiscovery').checked=!!s.autoDiscovery;
                     document.getElementById('audioEnabled').checked=!!s.audioEnabled;

@@ -797,3 +797,17 @@ Branch: `build-22-goat-cam`
 - fallback específico para Galaxy S21 permite tentar 3840×2160 mesmo quando o Camera2 omite 4K da lista YUV;
 - se a sessão frontal 4K for recusada pelo firmware, o app volta automaticamente para 1080p;
 - nenhuma APK foi gerada nesta etapa.
+
+
+## Build 23 — recursos Pro em teste
+Branch: `build-23-goat-cam`
+
+- preserva a limpeza do 8K e o novo 4K frontal da Build 22;
+- painel revisado: ISO, shutter, foco manual/auto, WB, EV, zoom, FPS, lentes, cena, abertura e filtro já existiam e foram mantidos;
+- adicionada marca d'água leve `GOAT CAM FREE` no pipeline NV21 normal, compartilhada por MJPEG e H.264;
+- controle de marca d'água exposto somente para teste; o bloqueio comercial Free/Pro ainda não foi ativado;
+- bitrate H.264 manual de 0 (automático) até 60 Mbps;
+- Smart Link persiste câmera, resolução, qualidade, JPEG, FPS, bitrate, rotação e estado da marca d'água;
+- três presets Pro salvos (P1/P2/P3) para câmera, resolução e parâmetros de transmissão;
+- removida do painel web a referência antiga ao 8K experimental;
+- plano Free/Pro registrado em `GOAT_CAM_PRO_PLAN.md`.

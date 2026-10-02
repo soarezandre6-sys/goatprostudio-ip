@@ -108,6 +108,10 @@ class MainActivity : AppCompatActivity() {
     private var actualStreamHeight = 0
     private var fallbackResolutionAfterFront4kFailure: ResolutionOption? = null
     private var autoRestartStreamAfterCameraBind = false
+    private var streamBitrateBps = 0
+    private var watermarkEnabled = true
+    private var preferredCameraKey: String? = null
+    private var preferredResolutionKey: String? = null
 
     private var metricsWindowStartedNs = 0L
     private var analysisFrameCount = 0
@@ -406,6 +410,7 @@ class MainActivity : AppCompatActivity() {
         autoDiscoverySwitch = findViewById(R.id.autoDiscoverySwitch)
         cameraExecutor = Executors.newSingleThreadExecutor()
         setupOrientationTracking()
+        restoreSmartLinkState()
 
         applyPreviewAspectRatio()
         setupCameraLensSelector()
@@ -445,6 +450,170 @@ class MainActivity : AppCompatActivity() {
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun smartLinkPrefs() =
+        getSharedPreferences("goat_cam_smart_link", Context.MODE_PRIVATE)
+
+    private fun proPresetPrefs() =
+        getSharedPreferences("goat_cam_pro_presets", Context.MODE_PRIVATE)
+
+    private fun restoreSmartLinkState() {
+        val prefs = smartLinkPrefs()
+        preferredCameraKey = prefs.getString("camera_key", null)
+        preferredResolutionKey = prefs.getString("resolution_key", null)
+        selectedQualityProfile = runCatching {
+            QualityProfile.valueOf(
+                prefs.getString(
+                    "quality",
+                    selectedQualityProfile.name
+                ).orEmpty()
+            )
+        }.getOrDefault(QualityProfile.BALANCED)
+        streamJpegQuality = prefs.getInt(
+            "jpeg_quality",
+            selectedQualityProfile.jpegQuality
+        ).coerceIn(1, 100)
+        streamTargetFps = prefs.getInt(
+            "target_fps",
+            selectedQualityProfile.targetFps
+        ).let { if (it <= 0) 0 else it.coerceIn(5, 60) }
+        streamBitrateBps = prefs.getInt("bitrate_bps", 0)
+            .coerceIn(0, 60_000_000)
+        watermarkEnabled = prefs.getBoolean("watermark_enabled", true)
+        selectedRotationMode = runCatching {
+            RotationMode.valueOf(
+                prefs.getString(
+                    "rotation",
+                    selectedRotationMode.name
+                ).orEmpty()
+            )
+        }.getOrDefault(RotationMode.AUTO)
+    }
+
+    private fun saveSmartLinkState() {
+        smartLinkPrefs().edit()
+            .putString(
+                "camera_key",
+                selectedCameraOption?.key ?: preferredCameraKey
+            )
+            .putString(
+                "resolution_key",
+                selectedResolution.key
+            )
+            .putString("quality", selectedQualityProfile.name)
+            .putInt("jpeg_quality", streamJpegQuality)
+            .putInt("target_fps", streamTargetFps)
+            .putInt("bitrate_bps", streamBitrateBps)
+            .putBoolean("watermark_enabled", watermarkEnabled)
+            .putString("rotation", selectedRotationMode.name)
+            .apply()
+    }
+
+    private fun saveProPreset(slot: Int) {
+        val safeSlot = slot.coerceIn(1, 3)
+        val prefix = "preset_${safeSlot}_"
+        proPresetPrefs().edit()
+            .putBoolean(prefix + "saved", true)
+            .putString(prefix + "camera_key", selectedCameraOption?.key)
+            .putString(prefix + "resolution_key", selectedResolution.key)
+            .putString(prefix + "quality", selectedQualityProfile.name)
+            .putInt(prefix + "jpeg_quality", streamJpegQuality)
+            .putInt(prefix + "target_fps", streamTargetFps)
+            .putInt(prefix + "bitrate_bps", streamBitrateBps)
+            .putBoolean(prefix + "watermark_enabled", watermarkEnabled)
+            .putString(prefix + "rotation", selectedRotationMode.name)
+            .apply()
+        Toast.makeText(
+            this,
+            "Preset Pro $safeSlot salvo.",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun loadProPreset(slot: Int) {
+        val safeSlot = slot.coerceIn(1, 3)
+        val prefix = "preset_${safeSlot}_"
+        val prefs = proPresetPrefs()
+        if (!prefs.getBoolean(prefix + "saved", false)) {
+            Toast.makeText(
+                this,
+                "Preset Pro $safeSlot ainda não foi salvo.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        selectedQualityProfile = runCatching {
+            QualityProfile.valueOf(
+                prefs.getString(
+                    prefix + "quality",
+                    QualityProfile.BALANCED.name
+                ).orEmpty()
+            )
+        }.getOrDefault(QualityProfile.BALANCED)
+        streamJpegQuality = prefs.getInt(
+            prefix + "jpeg_quality",
+            selectedQualityProfile.jpegQuality
+        ).coerceIn(1, 100)
+        streamTargetFps = prefs.getInt(
+            prefix + "target_fps",
+            selectedQualityProfile.targetFps
+        ).let { if (it <= 0) 0 else it.coerceIn(5, 60) }
+        streamBitrateBps = prefs.getInt(
+            prefix + "bitrate_bps",
+            0
+        ).coerceIn(0, 60_000_000)
+        watermarkEnabled = prefs.getBoolean(
+            prefix + "watermark_enabled",
+            true
+        )
+        selectedRotationMode = runCatching {
+            RotationMode.valueOf(
+                prefs.getString(
+                    prefix + "rotation",
+                    RotationMode.AUTO.name
+                ).orEmpty()
+            )
+        }.getOrDefault(RotationMode.AUTO)
+        preferredCameraKey = prefs.getString(prefix + "camera_key", null)
+        preferredResolutionKey = prefs.getString(
+            prefix + "resolution_key",
+            null
+        )
+
+        preferredCameraKey?.let { key ->
+            cameraLensOptions.firstOrNull { it.key == key }
+                ?.takeIf { it.key != selectedCameraOption?.key }
+                ?.let { selectCameraLens(it) }
+        }
+
+        previewView.postDelayed({
+            refreshResolutionOptions()
+            preferredResolutionKey?.let { key ->
+                availableResolutionOptions.firstOrNull { it.key == key }
+                    ?.takeIf { it.key != selectedResolution.key }
+                    ?.let { selectResolutionOption(it) }
+            }
+            if (::qualitySpinner.isInitialized) {
+                qualitySpinner.setSelection(
+                    QualityProfile.entries.indexOf(selectedQualityProfile)
+                )
+            }
+            if (::rotationSpinner.isInitialized) {
+                rotationSpinner.setSelection(
+                    RotationMode.entries.indexOf(selectedRotationMode)
+                )
+            }
+            h264Encoder.stop()
+            updateStreamInfo()
+            saveSmartLinkState()
+            Toast.makeText(
+                this,
+                "Preset Pro $safeSlot carregado.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }, 350L)
     }
 
     private fun openGoatProStudioWebsite() {
@@ -828,10 +997,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         selectedCameraOption =
-            cameraLensOptions.firstOrNull {
-                it.facing == CameraSelector.LENS_FACING_BACK &&
-                    it.label.contains("principal", ignoreCase = true)
+            preferredCameraKey?.let { key ->
+                cameraLensOptions.firstOrNull { it.key == key }
             }
+                ?: cameraLensOptions.firstOrNull {
+                    it.facing == CameraSelector.LENS_FACING_BACK &&
+                        it.label.contains("principal", ignoreCase = true)
+                }
                 ?: cameraLensOptions.firstOrNull {
                     it.facing == CameraSelector.LENS_FACING_BACK
                 }
@@ -876,6 +1048,8 @@ class MainActivity : AppCompatActivity() {
         manualFocusEnabled = false
         selectedCameraOption = option
         lensFacing = option.facing
+        preferredCameraKey = option.key
+        saveSmartLinkState()
 
         if (updateSpinner) {
             val index = cameraLensOptions.indexOfFirst { it.key == option.key }
@@ -1054,7 +1228,10 @@ class MainActivity : AppCompatActivity() {
             it.key == selectedResolution.key
         }
 
-        selectedResolution = stillAvailable
+        selectedResolution = preferredResolutionKey?.let { key ->
+            availableResolutionOptions.firstOrNull { it.key == key }
+        }
+            ?: stillAvailable
             ?: availableResolutionOptions.firstOrNull { it.key == "1920x1080" }
             ?: availableResolutionOptions
                 .filter {
@@ -1137,7 +1314,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         selectedResolution = option
+        preferredResolutionKey = option.key
         applyHighResolutionDefaults(option)
+        saveSmartLinkState()
         actualStreamWidth = 0
         actualStreamHeight = 0
         nextEncodeDueNs = 0L
@@ -1206,6 +1385,7 @@ class MainActivity : AppCompatActivity() {
                     nextEncodeDueNs = 0L
                     resetPerformanceStats()
                     updateStreamInfo()
+                    saveSmartLinkState()
                     if (server.isRunning()) {
                         Toast.makeText(
                             this@MainActivity,
@@ -1236,6 +1416,7 @@ class MainActivity : AppCompatActivity() {
                         if (mode == RotationMode.AUTO) autoSurfaceRotation else Surface.ROTATION_0
                     )
                     updateStreamInfo()
+                    saveSmartLinkState()
                 }
             }
 
@@ -1268,6 +1449,7 @@ class MainActivity : AppCompatActivity() {
 
             updateAutomaticDiscoveryText()
             updateConnectionStatus(server.videoClientCount())
+            saveSmartLinkState()
             Toast.makeText(
                 this,
                 if (checked) {
@@ -1478,7 +1660,12 @@ class MainActivity : AppCompatActivity() {
                             val prepared = ImageUtils.imageProxyToNv21(
                                 image = image,
                                 rotationDegrees = manualRotation
-                            )
+                            )?.let { frame ->
+                                WatermarkOverlay.apply(
+                                    frame,
+                                    watermarkEnabled
+                                )
+                            }
 
                             if (prepared != null) {
                                 if (prepared.width != actualStreamWidth ||
@@ -1510,12 +1697,17 @@ class MainActivity : AppCompatActivity() {
                                     val h264Fps =
                                         (if (streamTargetFps > 0) streamTargetFps else 30)
                                             .coerceIn(5, 60)
-                                    val bitrate = H264Encoder.recommendedBitrate(
-                                        prepared.width,
-                                        prepared.height,
-                                        h264Fps,
-                                        streamJpegQuality
-                                    )
+                                    val bitrate =
+                                        if (streamBitrateBps > 0) {
+                                            streamBitrateBps
+                                        } else {
+                                            H264Encoder.recommendedBitrate(
+                                                prepared.width,
+                                                prepared.height,
+                                                h264Fps,
+                                                streamJpegQuality
+                                            )
+                                        }
                                     if (h264Encoder.ensureStarted(
                                             prepared.width,
                                             prepared.height,
@@ -1926,7 +2118,40 @@ class MainActivity : AppCompatActivity() {
                 manualExposureTimeNs = requestedUs.coerceAtLeast(1L) * 1_000L
                 if (manualExposureEnabled) applyManualExposure()
             }
+
+            "bitrateKbps" -> {
+                val requested = value?.toIntOrNull() ?: return
+                streamBitrateBps = if (requested <= 0) {
+                    0
+                } else {
+                    requested.coerceIn(500, 60_000) * 1_000
+                }
+                h264Encoder.stop()
+                if (front4kDirectStreamer.isRunning()) {
+                    autoRestartStreamAfterCameraBind = true
+                    stopStreaming()
+                    startCamera()
+                }
+                updateStreamInfo()
+            }
+
+            "watermark" -> {
+                watermarkEnabled =
+                    value == "1" || value.equals("true", true)
+                updateStreamInfo()
+            }
+
+            "savePreset" -> {
+                val slot = value?.toIntOrNull() ?: return
+                saveProPreset(slot)
+            }
+
+            "loadPreset" -> {
+                val slot = value?.toIntOrNull() ?: return
+                loadProPreset(slot)
+            }
         }
+        saveSmartLinkState()
     }
 
     private fun camera2IntArray(
@@ -2363,6 +2588,9 @@ class MainActivity : AppCompatActivity() {
                 ",\"qualityLabel\":\"${selectedQualityProfile.shortLabel}\"" +
                 ",\"jpegQuality\":$streamJpegQuality" +
                 ",\"targetFps\":$streamTargetFps" +
+                ",\"bitrateKbps\":${streamBitrateBps / 1000}" +
+                ",\"watermarkEnabled\":$watermarkEnabled" +
+                ",\"smartLinkEnabled\":true" +
                 ",\"rotation\":\"${selectedRotationMode.name}\"" +
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
@@ -2520,8 +2748,12 @@ class MainActivity : AppCompatActivity() {
                         height = selectedResolution.size.height,
                         fps = selectedResolution.directFps ?: 30,
                         bitrate =
-                            selectedResolution.directBitrate
-                                ?: 32_000_000,
+                            if (streamBitrateBps > 0) {
+                                streamBitrateBps
+                            } else {
+                                selectedResolution.directBitrate
+                                    ?: 32_000_000
+                            },
                         fromOfficialProfile =
                             Front4kDirectStreamer.profileFor(
                                 this,

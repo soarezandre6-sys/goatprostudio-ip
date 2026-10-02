@@ -10,9 +10,6 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.params.RecommendedStreamConfigurationMap
-import android.media.CamcorderProfile
-import android.media.MediaRecorder
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -62,10 +59,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var torchButton: Button
     private lateinit var audioButton: Button
     private lateinit var copyAddressButton: Button
-    private lateinit var vendorDiagnosticButton: Button
-    private lateinit var vendorDiagnosticText: TextView
-    private lateinit var local8kTestButton: Button
-    private lateinit var local8kTestText: TextView
     private lateinit var websiteButton: Button
     private lateinit var cameraLensSpinner: Spinner
     private lateinit var resolutionSpinner: Spinner
@@ -89,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         label = "Full HD · 1920×1080",
         size = Size(1920, 1080),
         highResolution = false,
-        directHevc = false
+        directFront4k = false
     )
 
     private var availableResolutionOptions: List<ResolutionOption> =
@@ -113,9 +106,8 @@ class MainActivity : AppCompatActivity() {
     private var autoDiscoveryEnabled = true
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
-    private var fallbackResolutionAfterHevcFailure: ResolutionOption? = null
+    private var fallbackResolutionAfterFront4kFailure: ResolutionOption? = null
     private var autoRestartStreamAfterCameraBind = false
-    private var pendingLocal8kProfileTest = false
 
     private var metricsWindowStartedNs = 0L
     private var analysisFrameCount = 0
@@ -181,8 +173,15 @@ class MainActivity : AppCompatActivity() {
         RtspH264Server(8554, object : RtspH264Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
                 if (count > 0) {
-                    h264Encoder.requestKeyFrame()
-                } else {
+                    if (
+                        front4kDirectStreamer.isRunning() ||
+                        front4kDirectStreamer.isStarting()
+                    ) {
+                        front4kDirectStreamer.requestKeyFrame()
+                    } else {
+                        h264Encoder.requestKeyFrame()
+                    }
+                } else if (!front4kDirectStreamer.isRunning()) {
                     h264Encoder.stop()
                 }
                 runOnUiThread { updateConnectionStatus(server.videoClientCount()) }
@@ -208,154 +207,18 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private val hevcRtspServer: RtspH265Server by lazy {
-        RtspH265Server(8554, object : RtspH265Server.Listener {
-            override fun onActiveClientCountChanged(count: Int) {
-                if (count > 0) {
-                    if (
-                        mediaRecorderHevcStreamer.isRunning() ||
-                        mediaRecorderHevcStreamer.isStarting()
-                    ) {
-                        mediaRecorderHevcStreamer.requestKeyFrame()
-                    } else {
-                        hevcDirectStreamer.requestKeyFrame()
-                    }
-                }
-                runOnUiThread {
-                    updateConnectionStatus(server.videoClientCount())
-                }
-            }
-        })
-    }
-
-    private val hevcDirectStreamer: HevcDirectStreamer by lazy {
-        HevcDirectStreamer(this, object : HevcDirectStreamer.Listener {
-            override fun onAccessUnit(
-                data: ByteArray,
-                presentationTimeUs: Long,
-                keyFrame: Boolean,
-                codecConfig: Boolean
-            ) {
-                hevcRtspServer.onAccessUnit(
-                    data,
-                    presentationTimeUs,
-                    keyFrame,
-                    codecConfig
-                )
-            }
-
-            override fun onStarted(
-                width: Int,
-                height: Int,
-                fps: Int,
-                bitrate: Int
-            ) {
-                runOnUiThread {
-                    actualStreamWidth = width
-                    actualStreamHeight = height
-                    statusText.text =
-                        "TRANSMITINDO 8K HEVC PARA O GOAT PRO STUDIO"
-                    statusText.setTextColor(
-                        ContextCompat.getColor(
-                            this@MainActivity,
-                            R.color.green
-                        )
-                    )
-                    performanceText.text =
-                        "8K direto por hardware • HEVC/H.265 • " +
-                            fps + " FPS • " +
-                            String.format(
-                                java.util.Locale.US,
-                                "%.1f Mbps",
-                                bitrate / 1_000_000.0
-                            )
-                    updateStreamInfo()
-                    refreshAddress()
-                }
-            }
-
-            override fun onError(message: String) {
-                runOnUiThread {
-                    hevcRtspServer.stop()
-                    server.stop()
-                    updateConnectionStatus(0)
-
-                    val fallback = fallbackResolutionAfterHevcFailure
-                    if (fallback != null) {
-                        fallbackResolutionAfterHevcFailure = null
-                        selectedResolution = fallback
-                        applyHighResolutionDefaults(fallback)
-
-                        if (::resolutionSpinner.isInitialized) {
-                            val index =
-                                availableResolutionOptions.indexOfFirst {
-                                    it.key == fallback.key
-                                }
-                            if (index >= 0) {
-                                resolutionSpinner.setSelection(index)
-                            }
-                        }
-
-                        actualStreamWidth = 0
-                        actualStreamHeight = 0
-                        nextEncodeDueNs = 0L
-                        resetPerformanceStats()
-                        updateStreamInfo()
-                        refreshAddress()
-
-                        setError(
-                            "8K recusado pela câmera • restaurando " +
-                                fallback.label
-                        )
-                        Toast.makeText(
-                            this@MainActivity,
-                            "8K recusado. Voltando automaticamente para " +
-                                fallback.label + ".",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        autoRestartStreamAfterCameraBind = true
-                        startCamera()
-                        return@runOnUiThread
-                    }
-
-                    setError("8K HEVC: " + message)
-                    streamButton.text = "Iniciar transmissão"
-                    streamButton.setBackgroundResource(
-                        R.drawable.bg_button_primary
-                    )
-                    streamButton.backgroundTintList = null
-                    streamButton.setTextColor(
-                        ContextCompat.getColor(
-                            this@MainActivity,
-                            R.color.black
-                        )
-                    )
-                    Toast.makeText(
-                        this@MainActivity,
-                        message,
-                        Toast.LENGTH_LONG
-                    ).show()
-                    startCamera()
-                }
-            }
-
-            override fun onStopped() = Unit
-        })
-    }
-
-    private val mediaRecorderHevcStreamer:
-        MediaRecorderHevcStreamer by lazy {
-        MediaRecorderHevcStreamer(
+    private val front4kDirectStreamer:
+        Front4kDirectStreamer by lazy {
+        Front4kDirectStreamer(
             this,
-            object : MediaRecorderHevcStreamer.Listener {
+            object : Front4kDirectStreamer.Listener {
                 override fun onAccessUnit(
                     data: ByteArray,
                     presentationTimeUs: Long,
                     keyFrame: Boolean,
                     codecConfig: Boolean
                 ) {
-                    hevcRtspServer.onAccessUnit(
+                    rtspServer.onAccessUnit(
                         data,
                         presentationTimeUs,
                         keyFrame,
@@ -373,7 +236,7 @@ class MainActivity : AppCompatActivity() {
                         actualStreamWidth = width
                         actualStreamHeight = height
                         statusText.text =
-                            "TRANSMITINDO 8K MEDIARECORDER PARA O GOAT PRO STUDIO"
+                            "TRANSMITINDO 4K FRONTAL PARA O GOAT PRO STUDIO"
                         statusText.setTextColor(
                             ContextCompat.getColor(
                                 this@MainActivity,
@@ -381,7 +244,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                         performanceText.text =
-                            "8K MediaRecorder • HEVC/H.265 • " +
+                            "4K frontal direto • H.264 hardware • " +
                                 fps + " FPS • " +
                                 String.format(
                                     java.util.Locale.US,
@@ -395,27 +258,35 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onError(message: String) {
                     runOnUiThread {
-                        hevcRtspServer.stop()
+                        front4kDirectStreamer.stop()
+                        rtspServer.stop()
                         server.stop()
+                        audioCapture.stop()
+                        server.setAudioEnabled(false)
                         updateConnectionStatus(0)
 
                         val fallback =
-                            fallbackResolutionAfterHevcFailure
+                            fallbackResolutionAfterFront4kFailure
+                                ?: availableResolutionOptions.firstOrNull {
+                                    !it.directFront4k &&
+                                        it.key == "1920x1080"
+                                }
+                                ?: availableResolutionOptions.firstOrNull {
+                                    !it.directFront4k
+                                }
+
                         if (fallback != null) {
-                            fallbackResolutionAfterHevcFailure = null
+                            fallbackResolutionAfterFront4kFailure = null
                             selectedResolution = fallback
                             applyHighResolutionDefaults(fallback)
 
                             if (::resolutionSpinner.isInitialized) {
                                 val index =
-                                    availableResolutionOptions
-                                        .indexOfFirst {
-                                            it.key == fallback.key
-                                        }
+                                    availableResolutionOptions.indexOfFirst {
+                                        it.key == fallback.key
+                                    }
                                 if (index >= 0) {
-                                    resolutionSpinner.setSelection(
-                                        index
-                                    )
+                                    resolutionSpinner.setSelection(index)
                                 }
                             }
 
@@ -427,12 +298,12 @@ class MainActivity : AppCompatActivity() {
                             refreshAddress()
 
                             setError(
-                                "8K MediaRecorder recusado • restaurando " +
-                                    fallback.label
+                                "4K frontal recusado • " + message +
+                                    " • voltando para " + fallback.label
                             )
                             Toast.makeText(
                                 this@MainActivity,
-                                "8K recusado. Voltando automaticamente para " +
+                                "4K frontal recusado. Voltando para " +
                                     fallback.label + ".",
                                 Toast.LENGTH_LONG
                             ).show()
@@ -442,9 +313,8 @@ class MainActivity : AppCompatActivity() {
                             return@runOnUiThread
                         }
 
-                        setError("8K MediaRecorder: " + message)
-                        streamButton.text =
-                            "Iniciar transmissão"
+                        setError("4K frontal: " + message)
+                        streamButton.text = "Iniciar transmissão"
                         streamButton.setBackgroundResource(
                             R.drawable.bg_button_primary
                         )
@@ -455,209 +325,11 @@ class MainActivity : AppCompatActivity() {
                                 R.color.black
                             )
                         )
-                        Toast.makeText(
-                            this@MainActivity,
-                            message,
-                            Toast.LENGTH_LONG
-                        ).show()
                         startCamera()
                     }
                 }
 
                 override fun onStopped() = Unit
-            }
-        )
-    }
-
-    private val cameraX8kRecorderProbe:
-        CameraX8kRecorderProbe by lazy {
-        CameraX8kRecorderProbe(
-            this,
-            object : CameraX8kRecorderProbe.Listener {
-                override fun onNegotiated(
-                    width: Int,
-                    height: Int,
-                    selectedQuality: String
-                ) {
-                    runOnUiThread {
-                        actualStreamWidth = width
-                        actualStreamHeight = height
-                        performanceText.text =
-                            "CameraX negociou " +
-                                width + "×" + height +
-                                " • " + selectedQuality
-                        updateStreamInfo()
-                    }
-                }
-
-                override fun onStarted(
-                    width: Int,
-                    height: Int
-                ) {
-                    runOnUiThread {
-                        actualStreamWidth = width
-                        actualStreamHeight = height
-                        statusText.text =
-                            "8K 7680×4320 ACEITO PELO CAMERAX"
-                        statusText.setTextColor(
-                            ContextCompat.getColor(
-                                this@MainActivity,
-                                R.color.green
-                            )
-                        )
-                        performanceText.text =
-                            "CameraX VideoCapture/Recorder • " +
-                                width + "×" + height +
-                                " • sessão ativa"
-                        streamButton.text = "Parar teste 8K"
-                        streamButton.setBackgroundResource(
-                            R.drawable.bg_button_danger
-                        )
-                        streamButton.backgroundTintList = null
-                        streamButton.setTextColor(
-                            ContextCompat.getColor(
-                                this@MainActivity,
-                                android.R.color.white
-                            )
-                        )
-                        updateStreamInfo()
-                    }
-                }
-
-                override fun onError(message: String) {
-                    runOnUiThread {
-                        handleCameraX8kFailure(message)
-                    }
-                }
-
-                override fun onStopped() = Unit
-            }
-        )
-    }
-
-    private val local8kProfileRecorder:
-        Local8kProfileRecorder by lazy {
-        Local8kProfileRecorder(
-            this,
-            object : Local8kProfileRecorder.Listener {
-                override fun onProfileFound(
-                    cameraId: String,
-                    width: Int,
-                    height: Int,
-                    fps: Int,
-                    bitrate: Int,
-                    videoCodec: Int,
-                    fileFormat: Int
-                ) {
-                    runOnUiThread {
-                        local8kTestText.text =
-                            "Perfil oficial encontrado • câmera " +
-                                cameraId + " • " +
-                                width + "×" + height +
-                                " • " + fps + " FPS"
-                        performanceText.text =
-                            "CamcorderProfile 8KUHD • " +
-                                String.format(
-                                    java.util.Locale.US,
-                                    "%.1f Mbps",
-                                    bitrate / 1_000_000.0
-                                )
-                    }
-                }
-
-                override fun onStarted(
-                    file: java.io.File,
-                    width: Int,
-                    height: Int
-                ) {
-                    runOnUiThread {
-                        statusText.text =
-                            "GRAVANDO TESTE LOCAL 8K • 5 SEGUNDOS"
-                        statusText.setTextColor(
-                            ContextCompat.getColor(
-                                this@MainActivity,
-                                R.color.green
-                            )
-                        )
-                        local8kTestText.text =
-                            "Sessão aceita • gravando " +
-                                width + "×" + height +
-                                " no próprio celular…"
-                    }
-                }
-
-                override fun onCompleted(
-                    file: java.io.File,
-                    actualWidth: Int,
-                    actualHeight: Int,
-                    durationMs: Long
-                ) {
-                    runOnUiThread {
-                        local8kTestButton.isEnabled = true
-                        val exact8k =
-                            actualWidth == 7680 &&
-                                actualHeight == 4320
-
-                        if (exact8k) {
-                            statusText.text =
-                                "8K LOCAL ACEITO • 7680×4320"
-                            statusText.setTextColor(
-                                ContextCompat.getColor(
-                                    this@MainActivity,
-                                    R.color.green
-                                )
-                            )
-                            local8kTestText.text =
-                                "SUCESSO • arquivo 7680×4320 • " +
-                                    (durationMs / 1000.0) + " s • " +
-                                    file.name
-                            Toast.makeText(
-                                this@MainActivity,
-                                "8K LOCAL ACEITO: 7680×4320.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        } else {
-                            setError(
-                                "Teste local gravou " +
-                                    actualWidth + "×" +
-                                    actualHeight +
-                                    ", não 7680×4320"
-                            )
-                            local8kTestText.text =
-                                "Arquivo final: " +
-                                    actualWidth + "×" +
-                                    actualHeight + " • " +
-                                    file.name
-                            Toast.makeText(
-                                this@MainActivity,
-                                "O perfil abriu, mas o arquivo não ficou em 8K real.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-
-                        startCamera()
-                    }
-                }
-
-                override fun onError(message: String) {
-                    runOnUiThread {
-                        local8kTestButton.isEnabled = true
-                        setError("8K local recusado • " + message)
-                        local8kTestText.text = message
-                        Toast.makeText(
-                            this@MainActivity,
-                            "8K local recusado.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        startCamera()
-                    }
-                }
-
-                override fun onStopped() {
-                    runOnUiThread {
-                        local8kTestButton.isEnabled = true
-                    }
-                }
             }
         )
     }
@@ -671,9 +343,7 @@ class MainActivity : AppCompatActivity() {
             httpPort = 8080,
             isStreaming = { server.isRunning() },
             isAudioEnabled = { audioEnabled && server.isAudioEnabled() },
-            rtspCodec = {
-                if (selectedResolution.directHevc) "H265" else "H264"
-            }
+            rtspCodec = { "H264" }
         )
     }
 
@@ -690,43 +360,27 @@ class MainActivity : AppCompatActivity() {
     private val audioPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (pendingLocal8kProfileTest) {
-            pendingLocal8kProfileTest = false
-            if (granted) {
-                startLocal8kProfileTestNow()
-            } else {
-                local8kTestButton.isEnabled = true
-                local8kTestText.text =
-                    "Teste 8K cancelado: permissão de microfone necessária para o perfil oficial."
+        audioEnabled = granted
+        server.setAudioEnabled(granted)
+        if (granted && server.isRunning()) {
+            if (!audioCapture.start()) {
+                audioEnabled = false
+                server.setAudioEnabled(false)
                 Toast.makeText(
                     this,
-                    "O perfil oficial 8KUHD precisa da permissão de microfone para este teste.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        } else {
-            audioEnabled = granted
-            server.setAudioEnabled(granted)
-            if (granted && server.isRunning()) {
-                if (!audioCapture.start()) {
-                    audioEnabled = false
-                    server.setAudioEnabled(false)
-                    Toast.makeText(
-                        this,
-                        "Não foi possível iniciar o microfone.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-            if (!granted) {
-                Toast.makeText(
-                    this,
-                    "Permissão de microfone não concedida.",
+                    "Não foi possível iniciar o microfone.",
                     Toast.LENGTH_SHORT
                 ).show()
             }
-            updateAudioButton()
         }
+        if (!granted) {
+            Toast.makeText(
+                this,
+                "Permissão de microfone não concedida.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        updateAudioButton()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -744,14 +398,6 @@ class MainActivity : AppCompatActivity() {
         torchButton = findViewById(R.id.torchButton)
         audioButton = findViewById(R.id.audioButton)
         copyAddressButton = findViewById(R.id.copyAddressButton)
-        vendorDiagnosticButton =
-            findViewById(R.id.vendorDiagnosticButton)
-        vendorDiagnosticText =
-            findViewById(R.id.vendorDiagnosticText)
-        local8kTestButton =
-            findViewById(R.id.local8kTestButton)
-        local8kTestText =
-            findViewById(R.id.local8kTestText)
         websiteButton = findViewById(R.id.websiteButton)
         cameraLensSpinner = findViewById(R.id.cameraLensSpinner)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
@@ -776,10 +422,8 @@ class MainActivity : AppCompatActivity() {
         streamButton.setOnClickListener {
             if (
                 server.isRunning() ||
-                cameraX8kRecorderProbe.isRunning() ||
-                cameraX8kRecorderProbe.isStarting() ||
-                local8kProfileRecorder.isRunning() ||
-                local8kProfileRecorder.isStarting()
+                front4kDirectStreamer.isRunning() ||
+                front4kDirectStreamer.isStarting()
             ) {
                 stopStreaming()
             } else {
@@ -794,161 +438,12 @@ class MainActivity : AppCompatActivity() {
         torchButton.setOnClickListener { toggleTorch() }
         audioButton.setOnClickListener { toggleAudio() }
         copyAddressButton.setOnClickListener { copyAddressToClipboard() }
-        vendorDiagnosticButton.setOnClickListener {
-            runVendor8kDiagnostic()
-        }
-        local8kTestButton.setOnClickListener {
-            requestLocal8kProfileTest()
-        }
         websiteButton.setOnClickListener { openGoatProStudioWebsite() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
-        }
-    }
-
-    private fun requestLocal8kProfileTest() {
-        if (
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.CAMERA
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Toast.makeText(
-                this,
-                "Permissão de câmera necessária.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
-        local8kTestButton.isEnabled = false
-        local8kTestText.text =
-            "Preparando CamcorderProfile.QUALITY_8KUHD…"
-
-        if (
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendingLocal8kProfileTest = true
-            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-            return
-        }
-
-        startLocal8kProfileTestNow()
-    }
-
-    private fun startLocal8kProfileTestNow() {
-        local8kTestButton.isEnabled = false
-        local8kTestText.text =
-            "Abrindo perfil oficial 8KUHD e câmera Samsung…"
-
-        audioCapture.stop()
-        server.setAudioEnabled(false)
-        h264Encoder.stop()
-        local8kProfileRecorder.stop()
-        cameraX8kRecorderProbe.stop()
-        mediaRecorderHevcStreamer.stop()
-        hevcDirectStreamer.stop()
-        rtspServer.stop()
-        hevcRtspServer.stop()
-        server.stop()
-
-        val providerFuture =
-            ProcessCameraProvider.getInstance(this)
-        providerFuture.addListener({
-            try {
-                val provider = providerFuture.get()
-                provider.unbindAll()
-                previewUseCase = null
-                analysisUseCase = null
-                currentCamera = null
-                updateTorchButton()
-
-                val started = local8kProfileRecorder.start()
-                if (!started) {
-                    local8kTestButton.isEnabled = true
-                }
-            } catch (ex: Exception) {
-                local8kTestButton.isEnabled = true
-                val message =
-                    ex.message ?: ex.javaClass.simpleName
-                setError("Teste local 8K: " + message)
-                local8kTestText.text = message
-                startCamera()
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun runVendor8kDiagnostic() {
-        vendorDiagnosticButton.isEnabled = false
-        vendorDiagnosticText.text =
-            "Lendo Camera2, session keys e vendor tags…"
-        performanceText.text =
-            "Diagnóstico Samsung 8K em andamento…"
-
-        cameraExecutor.execute {
-            try {
-                val report =
-                    SamsungVendorDiagnostics(this).scan()
-
-                val clipboard =
-                    getSystemService(
-                        Context.CLIPBOARD_SERVICE
-                    ) as ClipboardManager
-                clipboard.setPrimaryClip(
-                    ClipData.newPlainText(
-                        "GOAT Cam - Diagnóstico 8K Samsung",
-                        report.fullText
-                    )
-                )
-
-                runCatching {
-                    java.io.File(
-                        filesDir,
-                        "goat-camera-vendor-report.txt"
-                    ).writeText(report.fullText)
-                }
-
-                runOnUiThread {
-                    vendorDiagnosticButton.isEnabled = true
-                    vendorDiagnosticText.text =
-                        report.summary +
-                            " • relatório completo copiado"
-                    performanceText.text =
-                        "Vendor diagnostic: " +
-                            report.vendorKeyCount +
-                            " vendor • " +
-                            report.matchedKeyCount +
-                            " relacionadas • " +
-                            report.cameraCount +
-                            " câmeras"
-                    Toast.makeText(
-                        this,
-                        "Diagnóstico 8K copiado. Cole o relatório no ChatGPT.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            } catch (ex: Exception) {
-                runOnUiThread {
-                    vendorDiagnosticButton.isEnabled = true
-                    vendorDiagnosticText.text =
-                        "Falha no diagnóstico: " +
-                            (
-                                ex.message
-                                    ?: ex.javaClass.simpleName
-                                )
-                    Toast.makeText(
-                        this,
-                        "Não foi possível ler o diagnóstico 8K.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
         }
     }
 
@@ -990,19 +485,10 @@ class MainActivity : AppCompatActivity() {
         val label: String,
         val size: Size,
         val highResolution: Boolean,
-        val directHevc: Boolean,
-        val overrideLogicalCameraId: String? = null,
-        val overridePhysicalCameraId: String? = null,
+        val directFront4k: Boolean,
+        val directCameraId: String? = null,
         val directFps: Int? = null,
         val directBitrate: Int? = null
-    )
-
-    private data class DirectCameraSource(
-        val logicalCameraId: String,
-        val physicalCameraId: String?,
-        val fps: Int = 24,
-        val bitrate: Int = 45_000_000,
-        val fromRecommendedRecordMap: Boolean = false
     )
 
     private fun resolutionKey(size: Size): String =
@@ -1010,7 +496,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun resolutionLabel(size: Size): String {
         val prefix = when {
-            size.width == 7680 && size.height == 4320 -> "8K UHD · HEVC experimental · "
             size.width == 3840 && size.height == 2160 -> "4K UHD · "
             size.width == 2560 && size.height == 1440 -> "2K QHD · "
             size.width == 1920 && size.height == 1080 -> "Full HD · "
@@ -1031,7 +516,7 @@ class MainActivity : AppCompatActivity() {
     private fun isUsableVideoResolution(size: Size): Boolean {
         val landscape = canonicalLandscapeSize(size)
         if (landscape.width < 640 || landscape.height < 360) return false
-        if (landscape.width > 7680 || landscape.height > 4320) return false
+        if (landscape.width > 3840 || landscape.height > 2160) return false
 
         val aspect = landscape.width.toFloat() / landscape.height.toFloat()
         val target = 16f / 9f
@@ -1412,265 +897,6 @@ class MainActivity : AppCompatActivity() {
         selectCameraLens(next)
     }
 
-    private fun find8kCameraSource(
-        manager: CameraManager
-    ): DirectCameraSource? {
-        val target = Size(7680, 4320)
-
-        fun profileFor(logicalId: String): Pair<Int, Int>? {
-            if (Build.VERSION.SDK_INT < 31) return null
-
-            val profiles = runCatching {
-                CamcorderProfile.getAll(
-                    logicalId,
-                    CamcorderProfile.QUALITY_8KUHD
-                )
-            }.getOrNull() ?: return null
-
-            val exactProfiles = profiles.videoProfiles.filter {
-                it.width == target.width &&
-                    it.height == target.height
-            }
-
-            val preferred = exactProfiles.firstOrNull {
-                it.codec == MediaRecorder.VideoEncoder.HEVC
-            } ?: exactProfiles.firstOrNull()
-
-            return preferred?.let {
-                Pair(
-                    it.frameRate.coerceIn(5, 30),
-                    it.bitrate.coerceIn(
-                        8_000_000,
-                        100_000_000
-                    )
-                )
-            }
-        }
-
-        // First choice: the HAL's recommended RECORD map. Android defines
-        // USECASE_RECORD as efficient PRIVATE outputs for supported recording
-        // profiles, so this is the closest public route to the OEM camera app.
-        if (Build.VERSION.SDK_INT >= 29) {
-            for (logicalId in manager.cameraIdList) {
-                val chars = runCatching {
-                    manager.getCameraCharacteristics(logicalId)
-                }.getOrNull() ?: continue
-
-                if (
-                    chars.get(CameraCharacteristics.LENS_FACING) !=
-                        CameraCharacteristics.LENS_FACING_BACK
-                ) {
-                    continue
-                }
-
-                val recordMap = runCatching {
-                    chars.getRecommendedStreamConfigurationMap(
-                        RecommendedStreamConfigurationMap.USECASE_RECORD
-                    )
-                }.getOrNull()
-
-                val privateSizes = runCatching {
-                    recordMap
-                        ?.getOutputSizes(ImageFormat.PRIVATE)
-                        .orEmpty()
-                }.getOrDefault(emptySet())
-
-                val mediaCodecSizes = runCatching {
-                    recordMap
-                        ?.getOutputSizes(
-                            android.media.MediaCodec::class.java
-                        )
-                        .orEmpty()
-                }.getOrDefault(emptySet())
-
-                val exactRecord8k =
-                    (privateSizes + mediaCodecSizes).any {
-                        canonicalLandscapeSize(it) == target
-                    }
-
-                if (exactRecord8k) {
-                    val profile = profileFor(logicalId)
-                    return DirectCameraSource(
-                        logicalCameraId = logicalId,
-                        physicalCameraId = null,
-                        fps = profile?.first ?: 24,
-                        bitrate = profile?.second ?: 45_000_000,
-                        fromRecommendedRecordMap = true
-                    )
-                }
-            }
-        }
-
-        // Second choice: official 8K camcorder profile on a logical camera.
-        if (Build.VERSION.SDK_INT >= 31) {
-            for (logicalId in manager.cameraIdList) {
-                val chars = runCatching {
-                    manager.getCameraCharacteristics(logicalId)
-                }.getOrNull() ?: continue
-
-                if (
-                    chars.get(CameraCharacteristics.LENS_FACING) !=
-                        CameraCharacteristics.LENS_FACING_BACK
-                ) {
-                    continue
-                }
-
-                val profile = profileFor(logicalId)
-                if (profile != null) {
-                    return DirectCameraSource(
-                        logicalCameraId = logicalId,
-                        physicalCameraId = null,
-                        fps = profile.first,
-                        bitrate = profile.second,
-                        fromRecommendedRecordMap = false
-                    )
-                }
-            }
-        }
-
-        var sensorFallback: DirectCameraSource? = null
-        var largestSensorSource: DirectCameraSource? = null
-        var largestSensorPixels = 0L
-
-        for (logicalId in manager.cameraIdList) {
-            val logicalChars = runCatching {
-                manager.getCameraCharacteristics(logicalId)
-            }.getOrNull() ?: continue
-
-            if (
-                logicalChars.get(CameraCharacteristics.LENS_FACING) !=
-                    CameraCharacteristics.LENS_FACING_BACK
-            ) {
-                continue
-            }
-
-            val physicalIds =
-                if (Build.VERSION.SDK_INT >= 28) {
-                    logicalChars.physicalCameraIds.toList()
-                } else {
-                    emptyList()
-                }
-
-            val candidates = listOf<String?>(null) + physicalIds
-            for (physicalId in candidates) {
-                val chars = runCatching {
-                    manager.getCameraCharacteristics(
-                        physicalId ?: logicalId
-                    )
-                }.getOrNull() ?: continue
-
-                val map = chars.get(
-                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-                )
-
-                val advertised = mutableListOf<Size>()
-                fun addSizes(sizes: Array<Size>?) {
-                    sizes.orEmpty().forEach { advertised.add(it) }
-                }
-
-                runCatching {
-                    addSizes(
-                        map?.getOutputSizes(
-                            android.media.MediaCodec::class.java
-                        )
-                    )
-                }
-                runCatching {
-                    addSizes(
-                        map?.getOutputSizes(
-                            android.media.MediaRecorder::class.java
-                        )
-                    )
-                }
-                runCatching {
-                    addSizes(
-                        map?.getOutputSizes(
-                            android.graphics.SurfaceTexture::class.java
-                        )
-                    )
-                }
-                runCatching {
-                    addSizes(
-                        map?.getHighResolutionOutputSizes(
-                            ImageFormat.YUV_420_888
-                        )
-                    )
-                }
-
-                if (
-                    advertised.any {
-                        canonicalLandscapeSize(it) == target
-                    }
-                ) {
-                    val profile = profileFor(logicalId)
-                    return DirectCameraSource(
-                        logicalCameraId = logicalId,
-                        physicalCameraId = physicalId,
-                        fps = profile?.first ?: 24,
-                        bitrate = profile?.second ?: 45_000_000
-                    )
-                }
-
-                val pixel = chars.get(
-                    CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
-                )
-                val active = chars.get(
-                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
-                )
-                val sensorWidth = maxOf(
-                    pixel?.width ?: 0,
-                    active?.width() ?: 0
-                )
-                val sensorHeight = maxOf(
-                    pixel?.height ?: 0,
-                    active?.height() ?: 0
-                )
-                val landscapeWidth =
-                    maxOf(sensorWidth, sensorHeight)
-                val landscapeHeight =
-                    minOf(sensorWidth, sensorHeight)
-                val sensorPixels =
-                    landscapeWidth.toLong() * landscapeHeight.toLong()
-
-                if (sensorPixels > largestSensorPixels) {
-                    largestSensorPixels = sensorPixels
-                    val profile = profileFor(logicalId)
-                    largestSensorSource = DirectCameraSource(
-                        logicalCameraId = logicalId,
-                        physicalCameraId = physicalId,
-                        fps = profile?.first ?: 24,
-                        bitrate = profile?.second ?: 45_000_000
-                    )
-                }
-
-                if (
-                    sensorFallback == null &&
-                    landscapeWidth >= target.width &&
-                    landscapeHeight >= target.height
-                ) {
-                    val profile = profileFor(logicalId)
-                    sensorFallback = DirectCameraSource(
-                        logicalCameraId = logicalId,
-                        physicalCameraId = physicalId,
-                        fps = profile?.first ?: 24,
-                        bitrate = profile?.second ?: 45_000_000
-                    )
-                }
-            }
-        }
-
-        if (sensorFallback != null) {
-            return sensorFallback
-        }
-
-        val samsungS21Family =
-            Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
-                Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
-                    .matches(Build.MODEL.orEmpty())
-
-        return if (samsungS21Family) largestSensorSource else null
-    }
-
     private fun supportedResolutionOptions(): List<ResolutionOption> {
         return try {
             val manager =
@@ -1737,7 +963,7 @@ class MainActivity : AppCompatActivity() {
                     highResolution =
                         size.width.toLong() * size.height.toLong() >
                             1920L * 1080L,
-                    directHevc = false
+                    directFront4k = false
                 )
             }
             high.forEach { (key, size) ->
@@ -1746,32 +972,31 @@ class MainActivity : AppCompatActivity() {
                     label = resolutionLabel(size),
                     size = size,
                     highResolution = true,
-                    directHevc = false
+                    directFront4k = false
                 )
             }
 
-            // 8K is intentionally separate from the working CameraX/YUV path.
-            // Do not substitute an intermediate sensor size such as 4032×...
-            // and do not hide the option merely because MediaCodec under-reports
-            // its capabilities. The direct HEVC path will attempt the exact size.
+            // Samsung may expose front UHD only through its recording
+            // profile/private encoder path, not through CameraX ImageAnalysis YUV.
+            // Add one exact 3840x2160 option only for the selected front camera.
             if (
-                option?.facing == CameraSelector.LENS_FACING_BACK
+                option?.facing == CameraSelector.LENS_FACING_FRONT &&
+                !combined.containsKey("3840x2160")
             ) {
-                val source = find8kCameraSource(manager)
-                if (source != null) {
-                    combined["7680x4320"] = ResolutionOption(
-                        key = "7680x4320",
-                        label =
-                            "8K UHD · 7680×4320 · RECORD experimental",
-                        size = Size(7680, 4320),
+                val profile = Front4kDirectStreamer.profileFor(
+                    this,
+                    option.logicalCameraId
+                )
+                if (profile != null) {
+                    combined["3840x2160"] = ResolutionOption(
+                        key = "3840x2160",
+                        label = "4K UHD · 3840×2160 · frontal",
+                        size = Size(3840, 2160),
                         highResolution = true,
-                        directHevc = true,
-                        overrideLogicalCameraId =
-                            source.logicalCameraId,
-                        overridePhysicalCameraId =
-                            source.physicalCameraId,
-                        directFps = source.fps,
-                        directBitrate = source.bitrate
+                        directFront4k = true,
+                        directCameraId = profile.cameraId,
+                        directFps = profile.fps,
+                        directBitrate = profile.bitrate
                     )
                 }
             }
@@ -1852,7 +1077,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyHighResolutionDefaults(option: ResolutionOption) {
         val width = option.size.width
         when {
-            option.directHevc -> {
+            option.directFront4k -> {
                 streamJpegQuality = 50
                 streamTargetFps = option.directFps ?: 24
                 selectedQualityProfile = QualityProfile.CUSTOM
@@ -1892,18 +1117,18 @@ class MainActivity : AppCompatActivity() {
         if (option.key == selectedResolution.key) return
 
         val transportModeChanged =
-            option.directHevc != selectedResolution.directHevc
+            option.directFront4k != selectedResolution.directFront4k
         val wasStreaming =
             server.isRunning() ||
-                cameraX8kRecorderProbe.isRunning() ||
-                cameraX8kRecorderProbe.isStarting()
+                front4kDirectStreamer.isRunning() ||
+                front4kDirectStreamer.isStarting()
 
         if (
-            option.directHevc &&
-            !selectedResolution.directHevc &&
+            option.directFront4k &&
+            !selectedResolution.directFront4k &&
             wasStreaming
         ) {
-            fallbackResolutionAfterHevcFailure = selectedResolution
+            fallbackResolutionAfterFront4kFailure = selectedResolution
         }
 
         if (transportModeChanged && wasStreaming) {
@@ -1938,7 +1163,6 @@ class MainActivity : AppCompatActivity() {
             "FHD", "1080P" -> "1920x1080"
             "QHD", "2K", "1440P" -> "2560x1440"
             "UHD", "4K", "2160P" -> "3840x2160"
-            "8K", "4320P" -> "7680x4320"
             else -> requested.replace("×", "x").lowercase()
         }
 
@@ -2091,16 +1315,10 @@ class MainActivity : AppCompatActivity() {
                 Surface.ROTATION_0
             }
 
-            if (selectedResolution.directHevc) {
+            if (selectedResolution.directFront4k) {
                 if (
-                    hevcDirectStreamer.isRunning() ||
-                    hevcDirectStreamer.isStarting() ||
-                    mediaRecorderHevcStreamer.isRunning() ||
-                    mediaRecorderHevcStreamer.isStarting() ||
-                    cameraX8kRecorderProbe.isRunning() ||
-                    cameraX8kRecorderProbe.isStarting() ||
-                    local8kProfileRecorder.isRunning() ||
-                    local8kProfileRecorder.isStarting()
+                    front4kDirectStreamer.isRunning() ||
+                    front4kDirectStreamer.isStarting()
                 ) {
                     return@addListener
                 }
@@ -2124,21 +1342,12 @@ class MainActivity : AppCompatActivity() {
                         )
                         .build()
 
-                val previewBuilder = Preview.Builder()
+                val preview = Preview.Builder()
                     .setResolutionSelector(previewResolutionSelector)
                     .setTargetRotation(targetRotation)
-
-                cameraOption?.physicalCameraId?.let { physicalId ->
-                    Camera2Interop.Extender(previewBuilder)
-                        .setPhysicalCameraId(physicalId)
-                }
-
-                val preview = previewBuilder
                     .build()
                     .also {
-                        it.setSurfaceProvider(
-                            previewView.surfaceProvider
-                        )
+                        it.setSurfaceProvider(previewView.surfaceProvider)
                     }
 
                 try {
@@ -2147,11 +1356,6 @@ class MainActivity : AppCompatActivity() {
                     previewUseCase = preview
                     currentCamera =
                         provider.bindToLifecycle(this, selector, preview)
-                    runCatching {
-                        currentCamera?.cameraControl?.setZoomRatio(
-                            cameraOption?.zoomRatio ?: 1f
-                        )
-                    }
                     torchEnabled = false
                     updateTorchButton()
                     if (!server.isRunning()) setReadyState()
@@ -2165,7 +1369,7 @@ class MainActivity : AppCompatActivity() {
                     analysisUseCase = null
                     currentCamera = null
                     updateTorchButton()
-                    setError("ERRO AO ABRIR PREVIEW 8K")
+                    setError("ERRO AO ABRIR PREVIEW 4K FRONTAL")
                 }
                 return@addListener
             }
@@ -3163,7 +2367,7 @@ class MainActivity : AppCompatActivity() {
                 ",\"autoDiscovery\":$autoDiscoveryEnabled" +
                 ",\"audioEnabled\":$audioEnabled" +
                 ",\"rtspClients\":${rtspServer.activeClientCount()}" +
-                ",\"h264Running\":${h264Encoder.isRunning()}" +
+                ",\"h264Running\":${h264Encoder.isRunning() || front4kDirectStreamer.isRunning()}" +
                 ",\"camera\":\"$cameraName\"" +
                 ",\"cameraKey\":\"$cameraKey\"" +
                 ",\"cameraOptionsCsv\":\"$cameraOptionsCsv\"" +
@@ -3255,168 +2459,7 @@ class MainActivity : AppCompatActivity() {
         audioButton.text = if (audioEnabled) "Áudio: ativado" else "Áudio: desligado"
     }
 
-    private fun handleCameraX8kFailure(message: String) {
-        cameraX8kRecorderProbe.stop()
-        mediaRecorderHevcStreamer.stop()
-        hevcDirectStreamer.stop()
-        hevcRtspServer.stop()
-        rtspServer.stop()
-        server.stop()
-        audioCapture.stop()
-        server.setAudioEnabled(false)
-        updateConnectionStatus(0)
-
-        val fallback =
-            fallbackResolutionAfterHevcFailure
-                ?: availableResolutionOptions.firstOrNull {
-                    !it.directHevc &&
-                        it.key == "3840x2160"
-                }
-                ?: availableResolutionOptions.firstOrNull {
-                    !it.directHevc
-                }
-
-        if (fallback != null) {
-            fallbackResolutionAfterHevcFailure = null
-            selectedResolution = fallback
-            applyHighResolutionDefaults(fallback)
-
-            if (::resolutionSpinner.isInitialized) {
-                val index =
-                    availableResolutionOptions.indexOfFirst {
-                        it.key == fallback.key
-                    }
-                if (index >= 0) {
-                    resolutionSpinner.setSelection(index)
-                }
-            }
-
-            actualStreamWidth = 0
-            actualStreamHeight = 0
-            nextEncodeDueNs = 0L
-            resetPerformanceStats()
-            updateStreamInfo()
-            refreshAddress()
-
-            setError(
-                "8K CameraX recusado • " + message
-            )
-            Toast.makeText(
-                this,
-                "8K CameraX recusado. Voltando para " +
-                    fallback.label + ".",
-                Toast.LENGTH_LONG
-            ).show()
-
-            autoRestartStreamAfterCameraBind = true
-            startCamera()
-            return
-        }
-
-        setError("8K CameraX: " + message)
-        streamButton.text = "Iniciar transmissão"
-        streamButton.setBackgroundResource(
-            R.drawable.bg_button_primary
-        )
-        streamButton.backgroundTintList = null
-        streamButton.setTextColor(
-            ContextCompat.getColor(this, R.color.black)
-        )
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_LONG
-        ).show()
-        startCamera()
-    }
-
-    private fun startCameraX8kTest() {
-        audioCapture.stop()
-        server.setAudioEnabled(false)
-        h264Encoder.stop()
-        local8kProfileRecorder.stop()
-        cameraX8kRecorderProbe.stop()
-        mediaRecorderHevcStreamer.stop()
-        hevcDirectStreamer.stop()
-        rtspServer.stop()
-        hevcRtspServer.stop()
-        server.stop()
-
-        statusText.text =
-            "NEGOCIANDO 8K PELO CAMERAX…"
-        statusText.setTextColor(
-            ContextCompat.getColor(this, R.color.green)
-        )
-        performanceText.text =
-            "CameraX VideoCapture/Recorder • Quality.HIGHEST"
-        streamButton.text = "Cancelar teste 8K"
-        streamButton.setBackgroundResource(
-            R.drawable.bg_button_danger
-        )
-        streamButton.backgroundTintList = null
-        streamButton.setTextColor(
-            ContextCompat.getColor(
-                this,
-                android.R.color.white
-            )
-        )
-
-        val providerFuture =
-            ProcessCameraProvider.getInstance(this)
-        providerFuture.addListener({
-            try {
-                val provider = providerFuture.get()
-                val option = selectedCameraOption
-                    ?: throw IllegalStateException(
-                        "Câmera selecionada indisponível."
-                    )
-
-                val logicalCameraId =
-                    selectedResolution.overrideLogicalCameraId
-                        ?: option.logicalCameraId
-
-                val selector = CameraSelector.Builder()
-                    .addCameraFilter { cameraInfos ->
-                        cameraInfos.filter { cameraInfo ->
-                            runCatching {
-                                Camera2CameraInfo
-                                    .from(cameraInfo)
-                                    .cameraId ==
-                                    logicalCameraId
-                            }.getOrDefault(false)
-                        }
-                    }
-                    .build()
-
-                previewUseCase = null
-                analysisUseCase = null
-                currentCamera = null
-                updateTorchButton()
-
-                val started = cameraX8kRecorderProbe.start(
-                    cameraProvider = provider,
-                    lifecycleOwner = this,
-                    cameraSelector = selector,
-                    expectedSize = Size(7680, 4320)
-                )
-
-                if (!started) {
-                    updateConnectionStatus(0)
-                }
-            } catch (ex: Exception) {
-                handleCameraX8kFailure(
-                    ex.message ?: ex.javaClass.simpleName
-                )
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
     private fun startStreaming() {
-        if (selectedResolution.directHevc) {
-            startCameraX8kTest()
-            return
-        }
-
         val ip = NetworkUtils.localIpv4()
         if (ip == null) {
             setError("CONECTE O CELULAR A UMA REDE WI-FI")
@@ -3428,7 +2471,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        cameraX8kRecorderProbe.stop()
+        front4kDirectStreamer.stop()
         refreshAddress()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
@@ -3446,19 +2489,15 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
-        if (selectedResolution.directHevc) {
+        if (selectedResolution.directFront4k) {
             h264Encoder.stop()
-            rtspServer.stop()
-            hevcRtspServer.start()
-
-            statusText.text =
-                "INICIANDO 8K HEVC POR HARDWARE…"
+            rtspServer.start()
+            statusText.text = "INICIANDO 4K FRONTAL H.264…"
             statusText.setTextColor(
                 ContextCompat.getColor(this, R.color.green)
             )
 
-            val providerFuture =
-                ProcessCameraProvider.getInstance(this)
+            val providerFuture = ProcessCameraProvider.getInstance(this)
             providerFuture.addListener({
                 try {
                     val provider = providerFuture.get()
@@ -3469,75 +2508,55 @@ class MainActivity : AppCompatActivity() {
                     updateTorchButton()
 
                     val option = selectedCameraOption
-                    if (option == null) {
-                        throw IllegalStateException(
-                            "Câmera selecionada indisponível."
+                        ?: throw IllegalStateException(
+                            "Câmera frontal selecionada indisponível."
                         )
-                    }
-
-                    val logicalCameraId =
-                        selectedResolution.overrideLogicalCameraId
+                    val cameraId =
+                        selectedResolution.directCameraId
                             ?: option.logicalCameraId
-                    val physicalCameraId =
-                        selectedResolution.overridePhysicalCameraId
-                            ?: if (
-                                logicalCameraId == option.logicalCameraId
-                            ) {
-                                option.physicalCameraId
-                            } else {
-                                null
-                            }
-
-                    val size = selectedResolution.size
-                    val fps =
-                        selectedResolution.directFps
-                            ?: if (streamTargetFps > 0) {
-                                streamTargetFps.coerceIn(5, 30)
-                            } else {
-                                24
-                            }
-                    val bitrate =
-                        selectedResolution.directBitrate
-                            ?: HevcDirectStreamer.recommendedBitrate(
-                                size.width,
-                                size.height,
-                                fps
-                            )
-
-                    hevcDirectStreamer.stop()
-                    val started = mediaRecorderHevcStreamer.start(
-                        logicalCameraId = logicalCameraId,
-                        physicalCameraId = physicalCameraId,
-                        width = size.width,
-                        height = size.height,
-                        fps = fps,
-                        bitrate = bitrate
+                    val profile = Front4kDirectStreamer.Profile(
+                        cameraId = cameraId,
+                        width = selectedResolution.size.width,
+                        height = selectedResolution.size.height,
+                        fps = selectedResolution.directFps ?: 30,
+                        bitrate =
+                            selectedResolution.directBitrate
+                                ?: 32_000_000,
+                        fromOfficialProfile =
+                            Front4kDirectStreamer.profileFor(
+                                this,
+                                cameraId
+                            )?.fromOfficialProfile == true
                     )
 
+                    fallbackResolutionAfterFront4kFailure =
+                        availableResolutionOptions.firstOrNull {
+                            !it.directFront4k &&
+                                it.key == "1920x1080"
+                        }
+                            ?: availableResolutionOptions.firstOrNull {
+                                !it.directFront4k
+                            }
+
+                    val started = front4kDirectStreamer.start(profile)
                     if (!started) {
-                        hevcRtspServer.stop()
+                        rtspServer.stop()
                         server.stop()
                     }
                 } catch (ex: Exception) {
-                    hevcRtspServer.stop()
+                    rtspServer.stop()
                     server.stop()
                     setError(
-                        "8K HEVC: " +
-                            (
-                                ex.message
-                                    ?: "falha ao abrir a câmera"
-                                )
+                        "4K frontal: " +
+                            (ex.message ?: "falha ao abrir a câmera")
                     )
                     startCamera()
                 }
             }, ContextCompat.getMainExecutor(this))
         } else {
-            mediaRecorderHevcStreamer.stop()
-            hevcDirectStreamer.stop()
-            hevcRtspServer.stop()
+            front4kDirectStreamer.stop()
             rtspServer.start()
-            statusText.text =
-                "TRANSMITINDO PARA O GOAT PRO STUDIO"
+            statusText.text = "TRANSMITINDO PARA O GOAT PRO STUDIO"
             statusText.setTextColor(
                 ContextCompat.getColor(this, R.color.green)
             )
@@ -3545,15 +2564,10 @@ class MainActivity : AppCompatActivity() {
 
         updateConnectionStatus(0)
         streamButton.text = "Parar transmissão"
-        streamButton.setBackgroundResource(
-            R.drawable.bg_button_danger
-        )
+        streamButton.setBackgroundResource(R.drawable.bg_button_danger)
         streamButton.backgroundTintList = null
         streamButton.setTextColor(
-            ContextCompat.getColor(
-                this,
-                android.R.color.white
-            )
+            ContextCompat.getColor(this, android.R.color.white)
         )
     }
 
@@ -3561,12 +2575,8 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
-        local8kProfileRecorder.stop()
-        cameraX8kRecorderProbe.stop()
-        mediaRecorderHevcStreamer.stop()
-        hevcDirectStreamer.stop()
+        front4kDirectStreamer.stop()
         rtspServer.stop()
-        hevcRtspServer.stop()
         server.stop()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
@@ -3575,16 +2585,14 @@ class MainActivity : AppCompatActivity() {
         setReadyState()
         updateConnectionStatus(0)
         streamButton.text = "Iniciar transmissão"
-        streamButton.setBackgroundResource(
-            R.drawable.bg_button_primary
-        )
+        streamButton.setBackgroundResource(R.drawable.bg_button_primary)
         streamButton.backgroundTintList = null
         streamButton.setTextColor(
             ContextCompat.getColor(this, R.color.black)
         )
 
         if (
-            selectedResolution.directHevc &&
+            selectedResolution.directFront4k &&
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA
@@ -3596,10 +2604,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateConnectionStatus(count: Int) {
         if (!::connectionStatusText.isInitialized) return
-        val rtspCount =
-            if (selectedResolution.directHevc) {
-                hevcRtspServer.activeClientCount()
-            } else {
+        val rtspCount = rtspServer.activeClientCount() else {
                 rtspServer.activeClientCount()
             }
         val totalCount = count + rtspCount
@@ -3636,12 +2641,13 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAddress() {
         val ip = NetworkUtils.localIpv4()
         addressText.text = if (ip != null) {
-            if (selectedResolution.directHevc) {
-                "8K HEVC/H.265 RTSP: rtsp://" +
-                    ip + ":8554/h265"
+            if (selectedResolution.directFront4k) {
+                "4K frontal H.264 RTSP: rtsp://" +
+                    ip + ":8554/h264"
             } else {
                 "MJPEG: http://" + ip +
-                    ":8080/video\nH.264 RTSP: rtsp://" +
+                    ":8080/video
+H.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
             }
         } else {
@@ -3664,10 +2670,10 @@ class MainActivity : AppCompatActivity() {
                 "FPS sem limite"
             }
 
-        if (selectedResolution.directHevc) {
+        if (selectedResolution.directFront4k) {
             streamInfoText.text =
                 dimensions + " • " + fpsLabel +
-                    " • HEVC/H.265 hardware • 8K experimental"
+                    " • H.264 hardware • 4K frontal"
             return
         }
 
@@ -3697,26 +2703,25 @@ class MainActivity : AppCompatActivity() {
         }
 
         val urls =
-            if (selectedResolution.directHevc) {
-                "8K HEVC/H.265 RTSP: rtsp://" +
-                    ip + ":8554/h265"
+            if (selectedResolution.directFront4k) {
+                "4K frontal H.264 RTSP: rtsp://" +
+                    ip + ":8554/h264"
             } else {
                 "MJPEG: http://" + ip +
-                    ":8080/video\nH.264 RTSP: rtsp://" +
+                    ":8080/video
+H.264 RTSP: rtsp://" +
                     ip + ":8554/h264"
             }
 
         val clipboard =
-            getSystemService(
-                Context.CLIPBOARD_SERVICE
-            ) as ClipboardManager
+            getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(
             ClipData.newPlainText("GOAT Cam", urls)
         )
         Toast.makeText(
             this,
-            if (selectedResolution.directHevc) {
-                "Endereço 8K HEVC copiado"
+            if (selectedResolution.directFront4k) {
+                "Endereço 4K frontal H.264 copiado"
             } else {
                 "Endereços MJPEG e H.264 copiados"
             },
@@ -3746,12 +2751,8 @@ class MainActivity : AppCompatActivity() {
         audioCapture.stop()
         server.setAudioEnabled(false)
         h264Encoder.stop()
-        local8kProfileRecorder.stop()
-        cameraX8kRecorderProbe.stop()
-        mediaRecorderHevcStreamer.stop()
-        hevcDirectStreamer.stop()
+        front4kDirectStreamer.stop()
         rtspServer.stop()
-        hevcRtspServer.stop()
         server.stop()
         cameraExecutor.shutdown()
         super.onDestroy()

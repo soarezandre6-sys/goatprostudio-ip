@@ -781,3 +781,19 @@ Branch: `build-21-goat-cam`
 - APK SHA-256: `61b5c8f761202898a33a3d761c2bed8b35e9cabebf53acbb332a8ac4acf2247b`;
 - compilação `:app:assembleDebug`: sucesso;
 - teste: tocar em `Teste local 8K oficial (5 s)`; o app usa `CamcorderProfile.QUALITY_8KUHD` + `MediaRecorder.setProfile()` e confirma a resolução final do arquivo.
+
+
+## Build 22 — remover 8K e recuperar 4K frontal
+Branch: `build-22-goat-cam`
+
+- 8K abandonado por enquanto após os testes públicos serem recusados no Galaxy S21;
+- removidos da interface o diagnóstico Samsung/vendor e o teste local 8K;
+- removida a opção 7680×4320 do seletor de resolução;
+- removidos do fluxo ativo CameraX 8K, HEVC 8K, MediaRecorder 8K e RTSP H.265 experimental;
+- removida a dependência `camera-video`, usada somente pelo teste CameraX 8K;
+- 4K traseiro e tele permanecem no caminho existente;
+- novo caminho exclusivo para 4K frontal: Camera2 `TEMPLATE_RECORD` -> Surface do MediaCodec AVC/H.264 -> RTSP H.264;
+- quando o perfil público `QUALITY_2160P` frontal existe, FPS e bitrate são derivados dele;
+- fallback específico para Galaxy S21 permite tentar 3840×2160 mesmo quando o Camera2 omite 4K da lista YUV;
+- se a sessão frontal 4K for recusada pelo firmware, o app volta automaticamente para 1080p;
+- nenhuma APK foi gerada nesta etapa.

@@ -31,3 +31,14 @@ A Build 25 usa:
 
 ## Próximo teste
 Selecionar a frontal, escolher 4K e iniciar a transmissão. Se falhar, registrar a mensagem completa depois de `4K frontal recusado` para distinguir recusa da sessão Camera2, falha do MediaRecorder ou ausência de frames.
+
+
+## Correção segundo plano / tela apagada
+- adicionada chave nativa `Continuar transmitindo em segundo plano / tela apagada`;
+- padrão: LIGADO;
+- foreground service só é mantido quando a chave está ligada;
+- WakeLock e Wi-Fi lock da Build 24 continuam ativos;
+- ao pressionar Home ou bloquear a tela no stream normal, CameraX troca para captura headless (ImageAnalysis sem PreviewView);
+- ao voltar ao app, o Preview é restaurado sem parar MJPEG/RTSP;
+- no 4K frontal MediaRecorder, a sessão Camera2 própria é preservada e não depende do PreviewView;
+- objetivo: impedir a perda do stream causada pela destruição da Surface visual.

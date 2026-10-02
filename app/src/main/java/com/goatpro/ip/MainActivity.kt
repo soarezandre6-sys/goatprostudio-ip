@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var qualitySpinner: Spinner
     private lateinit var rotationSpinner: Spinner
     private lateinit var autoDiscoverySwitch: SwitchCompat
+    private lateinit var backgroundStreamingSwitch: SwitchCompat
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var orientationListener: OrientationEventListener
@@ -104,6 +105,8 @@ class MainActivity : AppCompatActivity() {
     private var torchEnabled = false
     private var audioEnabled = false
     private var autoDiscoveryEnabled = true
+    private var backgroundStreamingEnabled = true
+    private var backgroundHeadless = false
     private var actualStreamWidth = 0
     private var actualStreamHeight = 0
     private var fallbackResolutionAfterFront4kFailure: ResolutionOption? = null
@@ -408,6 +411,7 @@ class MainActivity : AppCompatActivity() {
         qualitySpinner = findViewById(R.id.qualitySpinner)
         rotationSpinner = findViewById(R.id.rotationSpinner)
         autoDiscoverySwitch = findViewById(R.id.autoDiscoverySwitch)
+        backgroundStreamingSwitch = findViewById(R.id.backgroundStreamingSwitch)
         cameraExecutor = Executors.newSingleThreadExecutor()
         setupOrientationTracking()
         restoreSmartLinkState()
@@ -419,6 +423,7 @@ class MainActivity : AppCompatActivity() {
         setupQualitySelector()
         setupRotationSelector()
         setupAutomaticDiscovery()
+        setupBackgroundStreaming()
         refreshAddress()
         updateStreamInfo()
         updateConnectionStatus(0)
@@ -1515,6 +1520,78 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupBackgroundStreaming() {
+        val prefs = getSharedPreferences("goat_pro_ip", Context.MODE_PRIVATE)
+        backgroundStreamingEnabled = prefs.getBoolean(
+            "background_streaming_enabled",
+            true
+        )
+        backgroundStreamingSwitch.isChecked = backgroundStreamingEnabled
+        updateBackgroundStreamingText()
+
+        backgroundStreamingSwitch.setOnCheckedChangeListener { _, checked ->
+            backgroundStreamingEnabled = checked
+            prefs.edit()
+                .putBoolean("background_streaming_enabled", checked)
+                .apply()
+            updateBackgroundStreamingText()
+
+            if (checked && isStreamingActive()) {
+                startStreamingForegroundService()
+            } else if (!checked) {
+                stopStreamingForegroundService()
+            }
+
+            Toast.makeText(
+                this,
+                if (checked) {
+                    "Segundo plano ativado: Home e tela apagada manterão a transmissão."
+                } else {
+                    "Segundo plano desativado."
+                },
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun updateBackgroundStreamingText() {
+        if (!::backgroundStreamingSwitch.isInitialized) return
+        backgroundStreamingSwitch.text = if (backgroundStreamingEnabled) {
+            "Continuar transmitindo em segundo plano / tela apagada: LIGADO"
+        } else {
+            "Continuar transmitindo em segundo plano / tela apagada: DESLIGADO"
+        }
+    }
+
+    private fun enterBackgroundCaptureMode() {
+        if (!backgroundStreamingEnabled || !isStreamingActive()) return
+
+        StreamingCameraLifecycle.setActive(true)
+        startStreamingForegroundService()
+
+        // The dedicated 4K front recorder owns its Camera2/MediaRecorder surface
+        // and does not depend on PreviewView, so do not disturb that session.
+        if (selectedResolution.directFront4k) return
+
+        // Normal CameraX streaming used to keep PreviewView bound. When Android
+        // destroys the visible Surface after Home/screen-off, Samsung can stall
+        // the whole camera session. Rebind only ImageAnalysis while hidden.
+        if (!backgroundHeadless) {
+            backgroundHeadless = true
+            startCamera()
+        }
+    }
+
+    private fun exitBackgroundCaptureMode() {
+        if (!backgroundHeadless) return
+        backgroundHeadless = false
+
+        // Restore Preview + ImageAnalysis without touching MJPEG/RTSP servers.
+        if (isStreamingActive() && !selectedResolution.directFront4k) {
+            startCamera()
+        }
+    }
+
     private fun updateAutomaticDiscoveryText() {
         if (!::autoDiscoverySwitch.isInitialized) return
         autoDiscoverySwitch.text = if (autoDiscoveryEnabled) {
@@ -1783,9 +1860,23 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 provider.unbindAll()
-                previewUseCase = preview
                 analysisUseCase = analysis
-                currentCamera = provider.bindToLifecycle(StreamingCameraLifecycle, selector, preview, analysis)
+                if (backgroundHeadless && server.isRunning()) {
+                    previewUseCase = null
+                    currentCamera = provider.bindToLifecycle(
+                        StreamingCameraLifecycle,
+                        selector,
+                        analysis
+                    )
+                } else {
+                    previewUseCase = preview
+                    currentCamera = provider.bindToLifecycle(
+                        StreamingCameraLifecycle,
+                        selector,
+                        preview,
+                        analysis
+                    )
+                }
                 runCatching {
                     currentCamera?.cameraControl?.setZoomRatio(
                         cameraOption?.zoomRatio ?: 1f
@@ -2755,6 +2846,7 @@ class MainActivity : AppCompatActivity() {
             front4kDirectStreamer.isStarting()
 
     private fun startStreamingForegroundService() {
+        if (!backgroundStreamingEnabled) return
         StreamingCameraLifecycle.setActive(true)
         val intent = Intent(this, StreamingForegroundService::class.java)
         ContextCompat.startForegroundService(this, intent)
@@ -2889,6 +2981,7 @@ class MainActivity : AppCompatActivity() {
         rtspServer.stop()
         server.stop()
         stopStreamingForegroundService()
+        backgroundHeadless = false
         StreamingCameraLifecycle.setActive(true)
         nextEncodeDueNs = 0L
         resetPerformanceStats()
@@ -3041,6 +3134,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         StreamingCameraLifecycle.setActive(true)
+        exitBackgroundCaptureMode()
     }
 
     override fun onResume() {
@@ -3058,9 +3152,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        // If a stream is active, the foreground service keeps CameraX/Camera2 alive.
-        // Otherwise release the independent camera lifecycle while the app is hidden.
-        if (!isStreamingActive()) {
+        if (isStreamingActive() && backgroundStreamingEnabled) {
+            enterBackgroundCaptureMode()
+        } else {
+            backgroundHeadless = false
             StreamingCameraLifecycle.setActive(false)
         }
         super.onStop()

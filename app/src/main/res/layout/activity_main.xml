@@ -155,6 +155,26 @@
                 android:textColor="@color/muted"
                 android:textSize="11sp" />
 
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/backgroundStreamingSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:checked="true"
+                android:text="Continuar transmitindo em segundo plano / tela apagada: LIGADO"
+                android:textColor="@color/text"
+                android:textSize="13sp"
+                app:thumbTint="@color/gold"
+                app:trackTint="@color/line" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Ligado: Home e bloqueio da tela mantêm câmera, CPU, Wi-Fi e transmissão ativos."
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+
             <TextView
                 android:id="@+id/addressText"
                 android:layout_width="match_parent"

@@ -552,3 +552,19 @@ Branch: `build-13-goat-cam`
 - APK SHA-256: `ced82fbe9d86fd6af62f3f8b9eaa428a790ebaafcecdc7676438c83faf149196`;
 - compilação `:app:assembleDebug`: sucesso;
 - objetivo do teste: múltiplas lentes, resoluções dinâmicas, 2K/4K corrigidos e 8K HEVC experimental adaptável.
+
+
+### Ajuste pós-teste — 4K leve + 8K detectável
+- feedback real no Galaxy S21: 4K abriu, porém ficou pesado; 8K não apareceu e surgiu uma resolução intermediária próxima de 4032 px;
+- checkpoint antes deste ajuste: `checkpoint-build13-pre-4k8k-tuning-2026-10-02`;
+- seletor passa a priorizar apenas resoluções padrão de vídeo: 720p, 1080p, 1440p, 2160p e 4320p quando realmente aplicáveis;
+- resoluções intermediárias de sensor, como 4032×..., deixam de poluir o seletor principal;
+- 4K 3840×2160 passa a preferir Camera2 -> MediaCodec H.264 por Surface, mantendo o mesmo codec H.264 do GOAT Cam e retirando NV21/JPEG da rota pesada;
+- 4K direto usa 10 FPS como base e bitrate alto de aproximadamente 28 Mbps para preservar qualidade visual;
+- se o encoder H.264 do aparelho não aceitar o modo direto, o app mantém o caminho anterior em vez de fingir 4K;
+- 8K passa a procurar a câmera traseira capaz de alta resolução em todos os IDs lógicos e físicos do aparelho, não apenas na lente atualmente selecionada;
+- detecção 8K consulta MediaCodec, MediaRecorder, SurfaceTexture, high-resolution YUV e, como tentativa controlada, o tamanho real do sensor;
+- 8K aparece como `8K UHD · 7680×4320 · 10 FPS experimental` quando houver câmera/sensor traseiro compatível e encoder HEVC capaz de 7680×4320;
+- no 8K, o app pode trocar internamente para o módulo traseiro que realmente fornece a alta resolução;
+- 8K usa HEVC/H.265 direto por Surface, inicialmente a 10 FPS e bitrate alto;
+- nenhuma APK nova foi gerada nesta etapa.

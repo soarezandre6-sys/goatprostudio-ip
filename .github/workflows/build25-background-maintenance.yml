@@ -1,0 +1,26 @@
+name: Build 25 Background Maintenance
+
+on:
+  push:
+    branches: [ build-25-goat-cam ]
+    paths:
+      - ".github/build-25-background.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply background streaming fix
+        run: python tools/build25_background_fix.py
+      - name: Validate and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt app/src/main/res/layout/activity_main.xml BUILD_25_STATUS.md
+          git diff --cached --check
+          git commit -m "Build 25: corrigir transmissão com Home e tela apagada"
+          git push

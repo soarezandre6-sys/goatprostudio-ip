@@ -568,3 +568,22 @@ Branch: `build-13-goat-cam`
 - no 8K, o app pode trocar internamente para o módulo traseiro que realmente fornece a alta resolução;
 - 8K usa HEVC/H.265 direto por Surface, inicialmente a 10 FPS e bitrate alto;
 - nenhuma APK nova foi gerada nesta etapa.
+
+
+## Build 14 — teste 4K leve + 8K 7680×4320
+Branch: `build-14-goat-cam`
+
+- criada a partir da Build 13 já ajustada;
+- seletor principal não mostra resolução intermediária 4032×... como substituta de 8K;
+- 8K significa somente `7680×4320`;
+- 8K tenta HEVC/H.265 direto por Camera2 -> MediaCodec, base de 10 FPS;
+- 4K 3840×2160 prefere H.264 direto por hardware, base de 10 FPS e ~28 Mbps para reduzir carga sem reduzir a resolução;
+- workflow run: 37049141934 (#24);
+- conclusão: success;
+- artifact: `goat-cam-build-14-debug`;
+- artifact id: 11245219034;
+- artifact digest: `sha256:48094684dce539e4725aa3b8d70d2b603b0255e5ce6ace9cefbe9d9a4e5ed46c`;
+- APK: `GOAT-Cam-Build-14-Teste.apk`;
+- APK SHA-256: `e4e387914dc0426952c7ab09318ba87fac10f4a720d1a331ffc365e6e05e0ab3`;
+- tamanho APK: 4.866.664 bytes;
+- compilação `:app:assembleDebug`: sucesso.

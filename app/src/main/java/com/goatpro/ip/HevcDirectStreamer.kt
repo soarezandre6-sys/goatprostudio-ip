@@ -392,19 +392,17 @@ class HevcDirectStreamer(
                         .get(
                             CameraCharacteristics
                                 .SCALER_AVAILABLE_STREAM_USE_CASES
-                        )
-                        .orEmpty()
+                        ) ?: longArrayOf()
+
+                    val videoRecordUseCase =
+                        CameraMetadata
+                            .SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD
+                            .toLong()
 
                     if (
-                        supportedUseCases.contains(
-                            CameraMetadata
-                                .SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD
-                        )
+                        supportedUseCases.contains(videoRecordUseCase)
                     ) {
-                        output.setStreamUseCase(
-                            CameraMetadata
-                                .SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD
-                        )
+                        output.setStreamUseCase(videoRecordUseCase)
                     }
                 }
             }

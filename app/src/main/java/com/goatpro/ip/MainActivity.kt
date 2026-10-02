@@ -391,8 +391,6 @@ class MainActivity : AppCompatActivity() {
             val focal: Float?
         )
 
-        val raw = mutableListOf<RawCamera>()
-
         val backLogicalIds = ids.filter { id ->
             runCatching {
                 manager.getCameraCharacteristics(id)
@@ -419,72 +417,91 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        var usedPhysicalBack = false
-        if (primaryBackId != null && Build.VERSION.SDK_INT >= 28) {
-            val logicalChars = runCatching {
-                manager.getCameraCharacteristics(primaryBackId)
-            }.getOrNull()
+        /*
+         * Some OEMs expose rear lenses using a mixture of standalone logical
+         * cameras and physical children of a logical multi-camera. Merge both
+         * representations instead of discarding one of them.
+         */
+        val rearCandidates = mutableListOf<RawCamera>()
 
-            val physicalIds = logicalChars?.physicalCameraIds.orEmpty()
-            if (physicalIds.isNotEmpty()) {
-                val physicalRows = physicalIds.mapNotNull { physicalId ->
-                    runCatching {
-                        val chars = manager.getCameraCharacteristics(physicalId)
-                        RawCamera(
-                            logicalId = primaryBackId,
-                            physicalId = physicalId,
-                            facing = CameraCharacteristics.LENS_FACING_BACK,
-                            metric = cameraFocalMetric(chars),
-                            focal = cameraFocalLength(chars)
-                        )
-                    }.getOrNull()
-                }
-
-                if (physicalRows.isNotEmpty()) {
-                    raw.addAll(physicalRows)
-                    usedPhysicalBack = true
-                }
-            }
-        }
-
-        if (!usedPhysicalBack) {
-            backLogicalIds.forEach { id ->
-                runCatching {
-                    val chars = manager.getCameraCharacteristics(id)
-                    raw.add(
-                        RawCamera(
-                            logicalId = id,
-                            physicalId = null,
-                            facing = CameraCharacteristics.LENS_FACING_BACK,
-                            metric = cameraFocalMetric(chars),
-                            focal = cameraFocalLength(chars)
-                        )
-                    )
-                }
-            }
-        }
-
-        frontIds.forEach { id ->
+        backLogicalIds.forEach { logicalId ->
             runCatching {
-                val chars = manager.getCameraCharacteristics(id)
-                raw.add(
+                val chars = manager.getCameraCharacteristics(logicalId)
+                rearCandidates.add(
                     RawCamera(
-                        logicalId = id,
+                        logicalId = logicalId,
                         physicalId = null,
-                        facing = CameraCharacteristics.LENS_FACING_FRONT,
+                        facing = CameraCharacteristics.LENS_FACING_BACK,
                         metric = cameraFocalMetric(chars),
                         focal = cameraFocalLength(chars)
                     )
                 )
             }
+
+            if (Build.VERSION.SDK_INT >= 28) {
+                val physicalIds = runCatching {
+                    manager.getCameraCharacteristics(logicalId).physicalCameraIds
+                }.getOrDefault(emptySet())
+
+                physicalIds.forEach { physicalId ->
+                    runCatching {
+                        val chars = manager.getCameraCharacteristics(physicalId)
+                        rearCandidates.add(
+                            RawCamera(
+                                logicalId = logicalId,
+                                physicalId = physicalId,
+                                facing = CameraCharacteristics.LENS_FACING_BACK,
+                                metric = cameraFocalMetric(chars),
+                                focal = cameraFocalLength(chars)
+                            )
+                        )
+                    }
+                }
+            }
         }
 
-        val rear = raw.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
-            .sortedWith(compareBy<RawCamera> {
-                if (it.metric.isFinite()) it.metric else Float.MAX_VALUE
-            })
+        val sortedRearCandidates = rearCandidates.sortedWith(compareBy<RawCamera> {
+            if (it.metric.isFinite()) it.metric else Float.MAX_VALUE
+        })
 
-        val front = raw.filter { it.facing == CameraCharacteristics.LENS_FACING_FRONT }
+        val rear = mutableListOf<RawCamera>()
+        sortedRearCandidates.forEach { row ->
+            val duplicateIndex = rear.indexOfFirst { existing ->
+                if (existing.metric.isFinite() && row.metric.isFinite()) {
+                    val scale = maxOf(
+                        kotlin.math.abs(existing.metric),
+                        kotlin.math.abs(row.metric),
+                        0.001f
+                    )
+                    kotlin.math.abs(existing.metric - row.metric) <= scale * 0.08f
+                } else {
+                    existing.logicalId == row.logicalId &&
+                        existing.physicalId == row.physicalId
+                }
+            }
+
+            if (duplicateIndex < 0) {
+                rear.add(row)
+            } else {
+                val existing = rear[duplicateIndex]
+                if (existing.physicalId != null && row.physicalId == null) {
+                    rear[duplicateIndex] = row
+                }
+            }
+        }
+
+        val front = frontIds.mapNotNull { id ->
+            runCatching {
+                val chars = manager.getCameraCharacteristics(id)
+                RawCamera(
+                    logicalId = id,
+                    physicalId = null,
+                    facing = CameraCharacteristics.LENS_FACING_FRONT,
+                    metric = cameraFocalMetric(chars),
+                    focal = cameraFocalLength(chars)
+                )
+            }.getOrNull()
+        }
 
         val mainMetric = if (rear.isNotEmpty()) {
             val logicalMetric = primaryBackId?.let { id ->
@@ -642,23 +659,35 @@ class MainActivity : AppCompatActivity() {
         return try {
             val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val option = selectedCameraOption
-            val characteristicId =
-                option?.physicalCameraId ?: option?.logicalCameraId
+            val cameraIds = listOfNotNull(
+                option?.physicalCameraId,
+                option?.logicalCameraId
+            ).distinct()
 
-            val sizes = if (characteristicId != null) {
-                manager.getCameraCharacteristics(characteristicId)
-                    .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    ?.getOutputSizes(ImageFormat.YUV_420_888)
-                    ?.toList()
-                    .orEmpty()
-            } else {
-                emptyList()
+            val sizes = mutableListOf<Size>()
+            cameraIds.forEach { cameraId ->
+                runCatching {
+                    val map = manager.getCameraCharacteristics(cameraId)
+                        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+                    map?.getOutputSizes(ImageFormat.YUV_420_888)
+                        ?.let { sizes.addAll(it) }
+
+                    map?.getHighResolutionOutputSizes(ImageFormat.YUV_420_888)
+                        ?.let { sizes.addAll(it) }
+                }
+            }
+
+            val uniqueSizes = sizes.distinctBy {
+                it.width.toString() + "x" + it.height.toString()
             }
 
             val supported = ResolutionPreset.entries.filter { preset ->
-                sizes.any {
-                    it.width == preset.size.width &&
-                        it.height == preset.size.height
+                uniqueSizes.any { size ->
+                    (size.width == preset.size.width &&
+                        size.height == preset.size.height) ||
+                        (size.width == preset.size.height &&
+                            size.height == preset.size.width)
                 }
             }
 
@@ -885,28 +914,51 @@ class MainActivity : AppCompatActivity() {
                 Surface.ROTATION_0
             }
 
-            val fallbackRule = if (selectedPreset.experimental) {
+            val analysisFallbackRule = if (selectedPreset.experimental) {
                 ResolutionStrategy.FALLBACK_RULE_NONE
             } else {
                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
             }
 
-            val resolutionSelector = ResolutionSelector.Builder()
+            val analysisResolutionSelector = ResolutionSelector.Builder()
+                .setAllowedResolutionMode(
+                    if (selectedPreset.experimental) {
+                        ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
+                    } else {
+                        ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION
+                    }
+                )
                 .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
                 .setResolutionStrategy(
                     ResolutionStrategy(
                         size,
-                        fallbackRule
+                        analysisFallbackRule
+                    )
+                )
+                .build()
+
+            val previewTargetSize =
+                if (selectedPreset.experimental) ResolutionPreset.HD.size else size
+
+            val previewResolutionSelector = ResolutionSelector.Builder()
+                .setAllowedResolutionMode(
+                    ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION
+                )
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        previewTargetSize,
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                     )
                 )
                 .build()
 
             val previewBuilder = Preview.Builder()
-                .setResolutionSelector(resolutionSelector)
+                .setResolutionSelector(previewResolutionSelector)
                 .setTargetRotation(targetRotation)
 
             val analysisBuilder = ImageAnalysis.Builder()
-                .setResolutionSelector(resolutionSelector)
+                .setResolutionSelector(analysisResolutionSelector)
                 .setTargetRotation(targetRotation)
                 .setOutputImageRotationEnabled(true)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_NV21)

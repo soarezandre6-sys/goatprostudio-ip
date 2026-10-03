@@ -23,8 +23,13 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Apply Build 41 patch
-        run: python tools/build41_rtsp_quality_patch.py
+      - name: Apply Build 41 patch if needed
+        run: |
+          if grep -q "direct UHD is RTSP/H.264 only" app/src/main/java/com/goatpro/ip/GpuCameraH264Streamer.kt; then
+            echo "Build 41 patch already applied"
+          else
+            python tools/build41_rtsp_quality_patch.py
+          fi
 
       - name: Commit Build 41 source
         run: |

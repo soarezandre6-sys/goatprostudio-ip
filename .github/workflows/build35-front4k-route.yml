@@ -1,0 +1,40 @@
+name: Build 35 Front 4K Route
+
+on:
+  push:
+    branches: [ build-35-goat-cam ]
+    paths:
+      - ".github/build-35.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-35-goat-cam
+      - name: Apply Build 35 patch
+        run: python3 tools/build35_front4k_route_fix.py
+      - name: Commit Build 35 code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/Camera1GpuH264Streamer.kt app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt BUILD_35_STATUS.md
+          git commit -m "Build 35: separar preview 4K de gravação 4K" || true
+          git push origin HEAD:build-35-goat-cam
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goat-cam-build-35-debug
+          path: app/build/outputs/apk/debug/app-debug.apk

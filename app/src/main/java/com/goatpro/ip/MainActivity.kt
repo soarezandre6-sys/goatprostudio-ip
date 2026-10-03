@@ -397,9 +397,11 @@ class MainActivity : AppCompatActivity() {
                             front4kWindowFrames = 0L
                             val route = front4kDirectStreamer.lastSourceDescription
                                 .ifBlank { "rota 4K em inicialização" }
+                            val networkDiagnostics = rtspServer.diagnosticsSummary()
                             runOnUiThread {
                                 performanceText.text =
-                                    "4K frontal • %.1f FPS reais • $route"
+                                    ("4K frontal • %.1f FPS reais • $route\n" +
+                                        networkDiagnostics)
                                         .format(java.util.Locale.US, realFps)
                             }
                         }

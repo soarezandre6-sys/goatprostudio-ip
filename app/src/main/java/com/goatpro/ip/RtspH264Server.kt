@@ -59,6 +59,18 @@ class RtspH264Server(
         var queueOverflows = 0
 
         @Volatile
+        var totalQueueOverflows = 0L
+
+        @Volatile
+        var maxQueueDepth = 0
+
+        @Volatile
+        var lastSendDurationNs = 0L
+
+        @Volatile
+        var accessUnitsSent = 0L
+
+        @Volatile
         var playing = false
 
         @Volatile
@@ -169,6 +181,28 @@ class RtspH264Server(
 
     fun activeClientCount(): Int = activeCount.get()
 
+    fun diagnosticsSummary(): String {
+        val client = clients.firstOrNull {
+            it.playing && it.transportMode != TransportMode.NONE
+        } ?: return "RTSP sem cliente"
+
+        val transport = when (client.transportMode) {
+            TransportMode.TCP -> "TCP"
+            TransportMode.UDP -> "UDP"
+            TransportMode.NONE -> "-"
+        }
+        val sendMs = client.lastSendDurationNs / 1_000_000.0
+        return String.format(
+            Locale.US,
+            "RTSP %s • fila %d/4 (pico %d) • envio %.1f ms • estouros %d",
+            transport,
+            client.sendQueue.size,
+            client.maxQueueDepth,
+            sendMs,
+            client.totalQueueOverflows
+        )
+    }
+
     fun url(ip: String): String = "rtsp://${NetworkUtils.urlHost(ip)}:$port/h264"
 
     fun onAccessUnit(
@@ -222,6 +256,7 @@ class RtspH264Server(
         if (!client.sendQueue.offer(unit)) {
             client.sendQueue.clear()
             client.queueOverflows++
+            client.totalQueueOverflows++
             client.waitingForKeyFrame = true
 
             if (unit.keyFrame) {
@@ -238,6 +273,7 @@ class RtspH264Server(
             client.queueOverflows--
         }
 
+        client.maxQueueDepth = maxOf(client.maxQueueDepth, client.sendQueue.size)
         startClientSender(client)
     }
 
@@ -257,6 +293,7 @@ class RtspH264Server(
                         null
                     } ?: continue
 
+                    val sendStartedNs = System.nanoTime()
                     unit.nals.forEachIndexed { index, nal ->
                         sendNal(
                             client,
@@ -270,6 +307,9 @@ class RtspH264Server(
                             client.output.flush()
                         }
                     }
+                    client.lastSendDurationNs =
+                        (System.nanoTime() - sendStartedNs).coerceAtLeast(0L)
+                    client.accessUnitsSent++
                 }
             } catch (_: Exception) {
                 removeClient(client)
@@ -375,6 +415,10 @@ class RtspH264Server(
                             session.playing = true
                             session.waitingForKeyFrame = true
                             session.queueOverflows = 0
+                            session.totalQueueOverflows = 0L
+                            session.maxQueueDepth = 0
+                            session.lastSendDurationNs = 0L
+                            session.accessUnitsSent = 0L
                             session.sendQueue.clear()
                             val count = activeCount.incrementAndGet()
                             listener?.onActiveClientCountChanged(count)

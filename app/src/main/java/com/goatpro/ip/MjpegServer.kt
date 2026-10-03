@@ -101,7 +101,10 @@ class MjpegServer(
     private fun serve(socket: Socket) {
         try {
             socket.tcpNoDelay = true
-            socket.sendBufferSize = 1024 * 1024
+            // Build 45: keep the HTTP/MJPEG fallback low-latency too. A 1 MB
+            // kernel send buffer could retain too much UHD JPEG data when the
+            // receiver slows down. The producer already favors the latest frame.
+            runCatching { socket.sendBufferSize = 256 * 1024 }
             socket.soTimeout = 10_000
 
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))

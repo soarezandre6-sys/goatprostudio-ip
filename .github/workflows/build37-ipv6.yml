@@ -3,38 +3,15 @@ name: Build 37 IPv6
 on:
   push:
     branches: [ build-37-goat-cam ]
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  patch-build:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: build-37-goat-cam
-          fetch-depth: 0
-
-      - name: Apply Build 37 IPv6 patch
-        run: |
-          python3 tools/build37_fix_patch_script.py
-          python3 tools/build37_ipv6_patch.py
-
-      - name: Commit Build 37 code
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/com/goatpro/ip/NetworkUtils.kt \
-                  app/src/main/java/com/goatpro/ip/DiscoveryResponder.kt \
-                  app/src/main/java/com/goatpro/ip/MjpegServer.kt \
-                  app/src/main/java/com/goatpro/ip/RtspH264Server.kt \
-                  app/src/main/java/com/goatpro/ip/MainActivity.kt \
-                  BUILD_37_STATUS.md
-          if ! git diff --cached --quiet; then
-            git commit -m "Build 37: adicionar IPv6 dual stack"
-            git push origin HEAD:build-37-goat-cam
-          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -42,9 +19,11 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug
+        run: gradle :app:assembleDebug --stacktrace
 
       - name: Upload Build 37 APK
         uses: actions/upload-artifact@v4

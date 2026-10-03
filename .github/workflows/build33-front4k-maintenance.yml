@@ -1,0 +1,44 @@
+name: Build 33 Front 4K Stability
+
+on:
+  push:
+    branches: [ build-33-goat-cam ]
+    paths:
+      - ".github/build-33.trigger"
+  workflow_dispatch:
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-33-goat-cam
+          fetch-depth: 0
+      - name: Apply Build 33 patch
+        run: python tools/build33_front4k_stability_patch.py
+      - name: Commit Build 33 code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/Camera1GpuH264Streamer.kt \
+                  app/src/main/java/com/goatpro/ip/GpuCameraH264Streamer.kt \
+                  app/src/main/java/com/goatpro/ip/RtspH264Server.kt \
+                  app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt
+          git commit -m "Build 33: estabilizar 4K frontal no GOAT PRO Studio" || true
+          git push origin build-33-goat-cam
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goat-cam-build-33-debug
+          path: app/build/outputs/apk/debug/app-debug.apk

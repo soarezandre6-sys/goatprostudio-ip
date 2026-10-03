@@ -1,6 +1,6 @@
 # GOAT Cam Build 28
 
-Status: micro revisão aplicada no código; APK ainda não gerado nem validado no aparelho.
+Status: micro revisão aplicada; APK compilado com sucesso; validação no aparelho ainda pendente.
 
 ## Diagnóstico do 4K frontal
 - As tentativas anteriores pediam 3840x2160 diretamente para a HAL pública da câmera.
@@ -25,8 +25,16 @@ Status: micro revisão aplicada no código; APK ainda não gerado nem validado n
 - A GPU aplica crop/escala/rotação sem voltar ao ImageAnalysis pesado da CPU.
 - Ao cruzar orientação retrato/paisagem, o encoder GPU é reconfigurado com dimensões adequadas.
 
+## Build de teste
+- GitHub Actions run: `37080104855` (#40).
+- Head compilado: `fa9238f8cf74cd0f8eba17ba90db10a997724302`.
+- Artifact: `goat-cam-build-28-debug` / ID `11257999338`.
+- ZIP SHA-256: `d7ddb6f804155f61462b598ce5328812ac06bb395280211aec51e9477b7a68fc`.
+- APK: `GOAT-Cam-Build-28-Teste.apk`.
+- APK SHA-256: `7c0151d5b987cfb43f9b09438d32c64e84a92a397f440a00197b52fde38736b1`.
+
 ## Segurança / processo
 - Build 27 preservada.
 - Checkpoint criado: `checkpoint-build27-before-gpu-pipeline-2026-10-02`.
 - Release não foi alterada.
-- APK Build 28 ainda não foi gerado.
+- Arquivos temporários usados para a correção de compilação foram removidos após o build.

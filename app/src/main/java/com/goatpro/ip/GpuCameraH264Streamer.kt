@@ -2,6 +2,7 @@ package com.goatpro.ip
 
 import android.content.Context
 import android.graphics.SurfaceTexture
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
@@ -9,6 +10,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+import android.media.ImageReader
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -91,6 +93,7 @@ class GpuCameraH264Streamer(
             sourceWidth: Int,
             sourceHeight: Int
         )
+        fun onJpegFrame(data: ByteArray, width: Int, height: Int) = Unit
         fun onError(message: String)
         fun onStopped()
     }
@@ -141,6 +144,33 @@ class GpuCameraH264Streamer(
     private var cameraSurface: Surface? = null
     private var cameraTexture: SurfaceTexture? = null
 
+    private var mjpegReader: ImageReader? = null
+    private var mjpegThread: HandlerThread? = null
+    private var mjpegHandler: Handler? = null
+
+    @Volatile
+    private var mjpegEnabled = false
+
+    @Volatile
+    private var mjpegQuality = 50
+
+    @Volatile
+    private var mjpegFps = 5
+
+    private var mjpegSize = Size(0, 0)
+    private var mjpegOrientationDegrees = 0
+
+    private val mjpegCaptureRunnable = object : Runnable {
+        override fun run() {
+            if (!mjpegEnabled || stopping.get()) return
+            captureMjpegFrame()
+            workerHandler?.postDelayed(
+                this,
+                1000L / mjpegFps.coerceIn(1, MAX_GPU_MJPEG_FPS)
+            )
+        }
+    }
+
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -179,6 +209,7 @@ class GpuCameraH264Streamer(
         lastPresentationNs = 0L
         deliveryQueue.clear()
         config = request
+        workerHandler?.removeCallbacks(mjpegCaptureRunnable)
 
         val thread = HandlerThread("goat-gpu-camera-h264").apply { start() }
         val handler = Handler(thread.looper)
@@ -202,6 +233,13 @@ class GpuCameraH264Streamer(
             }
         }, 5_000L)
         return true
+    }
+
+    fun setMjpegOutput(enabled: Boolean, quality: Int = 50, fps: Int = 5) {
+        mjpegEnabled = enabled
+        mjpegQuality = quality.coerceIn(20, 90)
+        mjpegFps = fps.coerceIn(1, MAX_GPU_MJPEG_FPS)
+        workerHandler?.post { updateMjpegCaptureLoop() }
     }
 
     fun requestKeyFrame() {
@@ -268,6 +306,8 @@ class GpuCameraH264Streamer(
         // done in texture coordinates, not by swapping the encoded dimensions.
         outputWidth = request.targetWidth
         outputHeight = request.targetHeight
+        mjpegOrientationDegrees = totalRotation
+        setupMjpegReader(characteristics, outputWidth, outputHeight)
 
         val stableBitrate = request.targetBitrate.coerceAtMost(12_000_000)
         setupEncoder(outputWidth, outputHeight, actualFps, stableBitrate)
@@ -489,42 +529,14 @@ class GpuCameraH264Streamer(
                 }
                 captureSession = session
                 try {
-                    val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                        addTarget(surface)
-                        set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                        set(
-                            CaptureRequest.CONTROL_CAPTURE_INTENT,
-                            CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD
-                        )
-                        val afModes = characteristics.get(
-                            CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
-                        ) ?: intArrayOf()
-                        if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
-                            set(
-                                CaptureRequest.CONTROL_AF_MODE,
-                                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                            )
-                        }
-
-                        val ranges = characteristics.get(
-                            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
-                        ).orEmpty()
-                        chooseFpsRange(ranges, actualFps)?.let {
-                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
-                        }
-
-                        if (Build.VERSION.SDK_INT >= 30) {
-                            characteristics.get(
-                                CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
-                            )?.let { range ->
-                                set(
-                                    CaptureRequest.CONTROL_ZOOM_RATIO,
-                                    request.zoomRatio.coerceIn(range.lower, range.upper)
-                                )
-                            }
-                        }
-                    }
-                    session.setRepeatingRequest(builder.build(), null, handler)
+                    applyRepeatingRequest(
+                        session,
+                        camera,
+                        request,
+                        characteristics,
+                        handler
+                    )
+                    updateMjpegCaptureLoop()
                 } catch (ex: Exception) {
                     fail(
                         "Falha ao iniciar captura Camera2 GPU: " +
@@ -538,21 +550,222 @@ class GpuCameraH264Streamer(
             }
         }
 
+        val jpegSurface = mjpegReader?.surface
         if (Build.VERSION.SDK_INT >= 28) {
-            val output = OutputConfiguration(surface)
-            request.physicalCameraId?.let { output.setPhysicalCameraId(it) }
+            val outputs = mutableListOf(OutputConfiguration(surface))
+            if (jpegSurface != null) outputs.add(OutputConfiguration(jpegSurface))
+            request.physicalCameraId?.let { physicalId ->
+                outputs.forEach { output ->
+                    runCatching { output.setPhysicalCameraId(physicalId) }
+                }
+            }
             val executor = Executor { command -> handler.post(command) }
             camera.createCaptureSession(
                 SessionConfiguration(
                     SessionConfiguration.SESSION_REGULAR,
-                    listOf(output),
+                    outputs,
                     executor,
                     callback
                 )
             )
         } else {
+            val surfaces = mutableListOf(surface)
+            if (jpegSurface != null) surfaces.add(jpegSurface)
             @Suppress("DEPRECATION")
-            camera.createCaptureSession(listOf(surface), callback, handler)
+            camera.createCaptureSession(surfaces, callback, handler)
+        }
+    }
+
+    private fun applyRepeatingRequest(
+        session: CameraCaptureSession,
+        camera: CameraDevice,
+        request: Config,
+        characteristics: CameraCharacteristics,
+        handler: Handler
+    ) {
+        val surface = cameraSurface
+            ?: throw IllegalStateException("Surface da câmera indisponível.")
+        val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+            addTarget(surface)
+            set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            set(
+                CaptureRequest.CONTROL_CAPTURE_INTENT,
+                CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD
+            )
+            val afModes = characteristics.get(
+                CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
+            ) ?: intArrayOf()
+            if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
+                set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                )
+            }
+
+            val ranges = characteristics.get(
+                CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+            ).orEmpty()
+            chooseFpsRange(ranges, actualFps)?.let {
+                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+            }
+
+            if (Build.VERSION.SDK_INT >= 30) {
+                characteristics.get(
+                    CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                )?.let { range ->
+                    set(
+                        CaptureRequest.CONTROL_ZOOM_RATIO,
+                        request.zoomRatio.coerceIn(range.lower, range.upper)
+                    )
+                }
+            }
+        }
+        session.setRepeatingRequest(builder.build(), null, handler)
+    }
+
+    private fun setupMjpegReader(
+        characteristics: CameraCharacteristics,
+        targetWidth: Int,
+        targetHeight: Int
+    ) {
+        val size = chooseMjpegJpegSize(characteristics, targetWidth, targetHeight) ?: return
+        mjpegSize = size
+
+        val thread = HandlerThread("goat-gpu-mjpeg-jpeg").apply { start() }
+        val handler = Handler(thread.looper)
+        val reader = ImageReader.newInstance(
+            size.width,
+            size.height,
+            ImageFormat.JPEG,
+            2
+        )
+        reader.setOnImageAvailableListener({ source ->
+            val image = runCatching { source.acquireLatestImage() }.getOrNull()
+            if (image != null) {
+                try {
+                    if (mjpegEnabled && !stopping.get()) {
+                        val plane = image.planes.firstOrNull()
+                        val buffer = plane?.buffer
+                        if (buffer != null && buffer.remaining() > 0) {
+                            val copy = buffer.duplicate()
+                            val bytes = ByteArray(copy.remaining())
+                            copy.get(bytes)
+                            if (bytes.isNotEmpty()) {
+                                listener.onJpegFrame(
+                                    bytes,
+                                    size.width,
+                                    size.height
+                                )
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // MJPEG is a compatibility output. Never stop H.264 for it.
+                } finally {
+                    runCatching { image.close() }
+                }
+            }
+        }, handler)
+
+        mjpegThread = thread
+        mjpegHandler = handler
+        mjpegReader = reader
+    }
+
+    private fun chooseMjpegJpegSize(
+        characteristics: CameraCharacteristics,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Size? {
+        val map = characteristics.get(
+            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+        ) ?: return null
+        val sizes = map.getOutputSizes(ImageFormat.JPEG)
+            ?.filter { it.width > 0 && it.height > 0 }
+            .orEmpty()
+        if (sizes.isEmpty()) return null
+
+        sizes.firstOrNull {
+            it.width == targetWidth && it.height == targetHeight
+        }?.let { return it }
+
+        val targetAspect = targetWidth.toDouble() / targetHeight.toDouble()
+        val targetPixels = targetWidth.toLong() * targetHeight.toLong()
+        val nearAspect = sizes.filter { size ->
+            kotlin.math.abs(
+                size.width.toDouble() / size.height.toDouble() - targetAspect
+            ) <= 0.035
+        }
+        val notLarger = nearAspect.filter {
+            it.width.toLong() * it.height.toLong() <= targetPixels
+        }
+        return notLarger.maxByOrNull {
+            it.width.toLong() * it.height.toLong()
+        } ?: nearAspect.minByOrNull { size ->
+            kotlin.math.abs(
+                size.width.toLong() * size.height.toLong() - targetPixels
+            )
+        } ?: sizes.minByOrNull { size ->
+            val aspectPenalty = kotlin.math.abs(
+                size.width.toDouble() / size.height.toDouble() - targetAspect
+            ) * 1_000_000_000.0
+            val areaPenalty = kotlin.math.abs(
+                size.width.toLong() * size.height.toLong() - targetPixels
+            ).toDouble()
+            aspectPenalty + areaPenalty
+        }
+    }
+
+    private fun updateMjpegCaptureLoop() {
+        val handler = workerHandler ?: return
+        handler.removeCallbacks(mjpegCaptureRunnable)
+        if (
+            mjpegEnabled &&
+            !stopping.get() &&
+            captureSession != null &&
+            cameraDevice != null &&
+            mjpegReader != null
+        ) {
+            handler.post(mjpegCaptureRunnable)
+        }
+    }
+
+    private fun captureMjpegFrame() {
+        val session = captureSession ?: return
+        val camera = cameraDevice ?: return
+        val reader = mjpegReader ?: return
+        val request = config ?: return
+        val handler = workerHandler ?: return
+
+        try {
+            val builder = camera.createCaptureRequest(
+                CameraDevice.TEMPLATE_VIDEO_SNAPSHOT
+            ).apply {
+                addTarget(reader.surface)
+                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                set(
+                    CaptureRequest.CONTROL_CAPTURE_INTENT,
+                    CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT
+                )
+                set(CaptureRequest.JPEG_QUALITY, mjpegQuality.toByte())
+                set(CaptureRequest.JPEG_ORIENTATION, mjpegOrientationDegrees)
+
+                if (Build.VERSION.SDK_INT >= 30) {
+                    val characteristics = context
+                        .getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    characteristics.getCameraCharacteristics(
+                        request.physicalCameraId ?: request.logicalCameraId
+                    ).get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.let { range ->
+                        set(
+                            CaptureRequest.CONTROL_ZOOM_RATIO,
+                            request.zoomRatio.coerceIn(range.lower, range.upper)
+                        )
+                    }
+                }
+            }
+            session.capture(builder.build(), null, handler)
+        } catch (_: Exception) {
+            // Keep H.264 alive even if this device refuses a video snapshot.
         }
     }
 
@@ -766,6 +979,8 @@ class GpuCameraH264Streamer(
     private fun releasePipeline(notify: Boolean) {
         val wasActive = starting.getAndSet(false) || running.getAndSet(false)
         stopping.set(true)
+        mjpegEnabled = false
+        workerHandler?.removeCallbacks(mjpegCaptureRunnable)
 
         runCatching { captureSession?.stopRepeating() }
         runCatching { captureSession?.abortCaptures() }
@@ -778,6 +993,14 @@ class GpuCameraH264Streamer(
         cameraSurface = null
         runCatching { cameraTexture?.release() }
         cameraTexture = null
+
+        runCatching { mjpegReader?.setOnImageAvailableListener(null, null) }
+        runCatching { mjpegReader?.close() }
+        mjpegReader = null
+        mjpegHandler = null
+        runCatching { mjpegThread?.quitSafely() }
+        mjpegThread = null
+        mjpegSize = Size(0, 0)
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             runCatching {
@@ -925,6 +1148,8 @@ class GpuCameraH264Streamer(
             }
 
     companion object {
+        private const val MAX_GPU_MJPEG_FPS = 5
+
         private const val VERTEX_SHADER = """
             attribute vec4 aPosition;
             attribute vec2 aTexCoord;

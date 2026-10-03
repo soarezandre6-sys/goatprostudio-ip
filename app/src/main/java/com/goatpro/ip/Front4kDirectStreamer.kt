@@ -113,6 +113,7 @@ class Front4kDirectStreamer(
         mjpegQuality = quality.coerceIn(20, 90)
         mjpegFps = fps.coerceIn(1, 15)
         camera1GpuDelegate?.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
+        gpuDelegate?.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
     }
 
     fun start(profile: Profile): Boolean {
@@ -469,6 +470,10 @@ class Front4kDirectStreamer(
                     listener.onAccessUnit(data, presentationTimeUs, keyFrame, codecConfig)
                 }
 
+                override fun onJpegFrame(data: ByteArray, width: Int, height: Int) {
+                    listener.onJpegFrame(data, width, height)
+                }
+
                 override fun onStarted(
                     width: Int,
                     height: Int,
@@ -490,6 +495,7 @@ class Front4kDirectStreamer(
             }
         )
         gpuDelegate = local
+        local.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
 
         val safeBitrate = if (profile.bitrate > 0) {
             profile.bitrate.coerceIn(8_000_000, 12_000_000)

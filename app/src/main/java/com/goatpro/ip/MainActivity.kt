@@ -244,6 +244,9 @@ class MainActivity : AppCompatActivity() {
                 keyFrame: Boolean,
                 codecConfig: Boolean
             ) {
+                // Build 46: do not let late frames from the previous rear/regular
+                // encoder mix with the dedicated front-4K source.
+                if (selectedResolution.directFront4k) return
                 rtspServer.onAccessUnit(
                     data,
                     presentationTimeUs,
@@ -380,6 +383,13 @@ class MainActivity : AppCompatActivity() {
                     keyFrame: Boolean,
                     codecConfig: Boolean
                 ) {
+                    // Build 46: stale callbacks from a camera that has just been
+                    // deselected must never reach the shared RTSP server.
+                    if (
+                        !selectedResolution.directFront4k ||
+                        selectedCameraOption?.facing != CameraSelector.LENS_FACING_FRONT
+                    ) return
+
                     if (!codecConfig && data.isNotEmpty()) {
                         val now = System.nanoTime()
                         front4kH264FrameCount += 1L
@@ -1290,6 +1300,14 @@ class MainActivity : AppCompatActivity() {
         updateSpinner: Boolean = true
     ) {
         if (selectedCameraOption?.key == option.key) return
+
+        val wasStreaming = isStreamingActive()
+        if (wasStreaming) {
+            // Build 46: one selected lens = one active video producer.
+            // Stop the old camera/encoder/RTSP path before changing selection.
+            autoRestartStreamAfterCameraBind = true
+            stopStreaming()
+        }
 
         if (torchEnabled) {
             currentCamera?.cameraControl?.enableTorch(false)
@@ -3320,8 +3338,18 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.getColor(this, R.color.green)
             )
 
+            val expectedFrontCameraKey = selectedCameraOption?.key
+            val expectedFrontResolutionKey = selectedResolution.key
             val providerFuture = ProcessCameraProvider.getInstance(this)
             providerFuture.addListener({
+                if (
+                    !selectedResolution.directFront4k ||
+                    selectedCameraOption?.key != expectedFrontCameraKey ||
+                    selectedResolution.key != expectedFrontResolutionKey ||
+                    !server.isRunning()
+                ) {
+                    return@addListener
+                }
                 try {
                     val provider = providerFuture.get()
                     provider.unbindAll()

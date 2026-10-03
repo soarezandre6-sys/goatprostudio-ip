@@ -9,7 +9,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.util.Locale
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -29,12 +31,29 @@ class RtspH264Server(
 
     private enum class TransportMode { NONE, UDP, TCP }
 
+    private data class PendingAccessUnit(
+        val nals: List<ByteArray>,
+        val timestamp: Long,
+        val keyFrame: Boolean
+    )
+
     private class ClientSession(
         val socket: Socket,
         val output: OutputStream,
         val sessionId: String
     ) {
         val writeLock = Any()
+        val sendQueue = ArrayBlockingQueue<PendingAccessUnit>(4)
+        val senderRunning = AtomicBoolean(false)
+
+        @Volatile
+        var senderThread: Thread? = null
+
+        @Volatile
+        var waitingForKeyFrame = true
+
+        @Volatile
+        var queueOverflows = 0
 
         @Volatile
         var playing = false
@@ -53,6 +72,10 @@ class RtspH264Server(
 
         fun close() {
             playing = false
+            senderRunning.set(false)
+            runCatching { senderThread?.interrupt() }
+            senderThread = null
+            sendQueue.clear()
             runCatching { udpRtpSocket?.close() }
             runCatching { udpRtcpSocket?.close() }
             runCatching { socket.close() }
@@ -159,20 +182,84 @@ class RtspH264Server(
         val targets = clients.filter { it.playing && it.transportMode != TransportMode.NONE }
         if (targets.isEmpty()) return
 
+        val pending = PendingAccessUnit(
+            nals = sendNals.map { it.copyOf() },
+            timestamp = timestamp,
+            keyFrame = keyFrame
+        )
         targets.forEach { client ->
+            enqueueClientAccessUnit(client, pending)
+        }
+    }
+
+    private fun enqueueClientAccessUnit(client: ClientSession, unit: PendingAccessUnit) {
+        if (!client.playing || client.transportMode == TransportMode.NONE) return
+
+        if (client.waitingForKeyFrame && !unit.keyFrame) return
+        if (unit.keyFrame) client.waitingForKeyFrame = false
+
+        if (!client.sendQueue.offer(unit)) {
+            client.sendQueue.clear()
+            client.queueOverflows++
+            client.waitingForKeyFrame = true
+
+            if (unit.keyFrame) {
+                client.waitingForKeyFrame = false
+                client.sendQueue.offer(unit)
+            }
+
+            // A socket that blocks repeatedly is worse than a reconnect. Closing
+            // it forces the Studio to reconnect instead of leaving a frozen 4K frame.
+            if (client.queueOverflows >= 3) {
+                removeClient(client)
+                return
+            }
+        } else if (client.queueOverflows > 0) {
+            client.queueOverflows--
+        }
+
+        startClientSender(client)
+    }
+
+    private fun startClientSender(client: ClientSession) {
+        if (!client.senderRunning.compareAndSet(false, true)) return
+        client.senderThread = Thread {
             try {
-                sendNals.forEachIndexed { index, nal ->
-                    val marker = index == sendNals.lastIndex
-                    sendNal(client, nal, timestamp, marker)
-                }
-                if (client.transportMode == TransportMode.TCP) {
-                    synchronized(client.writeLock) {
-                        client.output.flush()
+                while (
+                    running.get() &&
+                    client.senderRunning.get() &&
+                    client.playing &&
+                    !client.socket.isClosed
+                ) {
+                    val unit = try {
+                        client.sendQueue.poll(250, TimeUnit.MILLISECONDS)
+                    } catch (_: InterruptedException) {
+                        null
+                    } ?: continue
+
+                    unit.nals.forEachIndexed { index, nal ->
+                        sendNal(
+                            client,
+                            nal,
+                            unit.timestamp,
+                            index == unit.nals.lastIndex
+                        )
+                    }
+                    if (client.transportMode == TransportMode.TCP) {
+                        synchronized(client.writeLock) {
+                            client.output.flush()
+                        }
                     }
                 }
             } catch (_: Exception) {
                 removeClient(client)
+            } finally {
+                client.senderRunning.set(false)
             }
+        }.apply {
+            name = "goat-rtsp-sender"
+            isDaemon = true
+            start()
         }
     }
 
@@ -266,6 +353,9 @@ class RtspH264Server(
                     "PLAY" -> {
                         if (!session.playing) {
                             session.playing = true
+                            session.waitingForKeyFrame = true
+                            session.queueOverflows = 0
+                            session.sendQueue.clear()
                             val count = activeCount.incrementAndGet()
                             listener?.onActiveClientCountChanged(count)
                         }

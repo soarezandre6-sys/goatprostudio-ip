@@ -118,6 +118,18 @@ class Camera1GpuH264Streamer(
     @Volatile
     private var firstEncodedFrame = false
 
+    @Volatile
+    private var lastCameraFrameNs = 0L
+
+    @Volatile
+    private var lastEncodedFrameNs = 0L
+
+    @Volatile
+    private var lastDeliveryCompletedNs = 0L
+
+    @Volatile
+    private var droppedDeliveryFrames = 0L
+
     private data class EncodedUnit(
         val data: ByteArray,
         val ptsUs: Long,
@@ -150,6 +162,10 @@ class Camera1GpuH264Streamer(
 
         stopping.set(false)
         firstEncodedFrame = false
+        lastCameraFrameNs = 0L
+        lastEncodedFrameNs = 0L
+        lastDeliveryCompletedNs = 0L
+        droppedDeliveryFrames = 0L
         deliveryQueue.clear()
 
         val thread = HandlerThread("goat-camera1-gpu-h264").apply { start() }
@@ -167,9 +183,46 @@ class Camera1GpuH264Streamer(
 
         handler.postDelayed({
             if ((starting.get() || running.get()) && !firstEncodedFrame) {
-                fail("Camera1 GPU abriu, mas não entregou H.264 em 5 segundos.")
+                fail("DIAG INICIAL: Camera1/GPU abriu, mas não entregou H.264 em 5 segundos.")
             }
         }, 5_000L)
+
+        Thread {
+            while (!stopping.get() && (starting.get() || running.get())) {
+                try {
+                    Thread.sleep(1_000L)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                if (!firstEncodedFrame) continue
+                val now = System.nanoTime()
+                val cameraAgeMs = if (lastCameraFrameNs > 0L)
+                    (now - lastCameraFrameNs) / 1_000_000L else Long.MAX_VALUE
+                val encoderAgeMs = if (lastEncodedFrameNs > 0L)
+                    (now - lastEncodedFrameNs) / 1_000_000L else Long.MAX_VALUE
+                val deliveryAgeMs = if (lastDeliveryCompletedNs > 0L)
+                    (now - lastDeliveryCompletedNs) / 1_000_000L else Long.MAX_VALUE
+
+                when {
+                    cameraAgeMs > 3_000L -> {
+                        fail("DIAG CAMERA: a frontal parou de entregar frames por ${cameraAgeMs} ms.")
+                        break
+                    }
+                    encoderAgeMs > 3_000L -> {
+                        fail("DIAG ENCODER: a câmera continua ativa, mas o H.264 parou por ${encoderAgeMs} ms.")
+                        break
+                    }
+                    deliveryQueue.isNotEmpty() && deliveryAgeMs > 3_000L -> {
+                        fail("DIAG RTSP/REDE: o H.264 continua sendo gerado, mas a entrega ao Studio travou por ${deliveryAgeMs} ms.")
+                        break
+                    }
+                }
+            }
+        }.apply {
+            name = "goat-camera1-gpu-health"
+            isDaemon = true
+            start()
+        }
         return true
     }
 
@@ -430,6 +483,7 @@ class Camera1GpuH264Streamer(
 
         try {
             texture.updateTexImage()
+            lastCameraFrameNs = System.nanoTime()
             texture.getTransformMatrix(textureTransform)
 
             GLES20.glViewport(0, 0, outputWidth, outputHeight)
@@ -512,8 +566,10 @@ class Camera1GpuH264Streamer(
                                 out.limit(info.offset + info.size)
                                 val bytes = ByteArray(info.size)
                                 out.get(bytes)
+                                lastEncodedFrameNs = System.nanoTime()
 
                                 if (!firstEncodedFrame) {
+                                    lastDeliveryCompletedNs = lastEncodedFrameNs
                                     firstEncodedFrame = true
                                     starting.set(false)
                                     running.set(true)
@@ -571,6 +627,7 @@ class Camera1GpuH264Streamer(
                         unit.keyFrame,
                         unit.codecConfig
                     )
+                    lastDeliveryCompletedNs = System.nanoTime()
                 } catch (_: Exception) {
                     // RTSP/network must never block the encoder drain thread.
                 }
@@ -585,8 +642,27 @@ class Camera1GpuH264Streamer(
     private fun enqueue(unit: EncodedUnit) {
         if (deliveryQueue.offer(unit)) return
         deliveryQueue.poll()
+        droppedDeliveryFrames++
         if (deliveryQueue.offer(unit)) {
             requestKeyFrame()
+        }
+
+        // If the network is briefly slower than 4K, reduce bitrate without
+        // touching resolution or FPS. This keeps latency bounded instead of
+        // allowing a backlog to freeze the visible stream.
+        if (droppedDeliveryFrames > 0L && droppedDeliveryFrames % 12L == 0L) {
+            val newBitrate = (actualBitrate * 0.82).toInt().coerceAtLeast(10_000_000)
+            if (newBitrate < actualBitrate) {
+                actualBitrate = newBitrate
+                runCatching {
+                    codec?.setParameters(
+                        Bundle().apply {
+                            putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, newBitrate)
+                        }
+                    )
+                }
+                requestKeyFrame()
+            }
         }
     }
 

@@ -128,6 +128,34 @@ class Front4kDirectStreamer(
                     deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                     rotationOffsetDegrees = normalize(profile.rotationOffsetDegrees)
                 )
+
+                // Build 35: choose the route that matches what the camera really
+                // publishes. If 3840x2160 exists as a PREVIEW size, use the
+                // SurfaceTexture path (which can also feed MJPEG /video). If 4K is
+                // only a recording/video size, use MediaRecorder instead of forcing
+                // recording parameters into the preview path.
+                val previewProbe = Camera1GpuH264Streamer.probe(
+                    direct.legacyCameraId,
+                    direct.width,
+                    direct.height
+                )
+                if (previewProbe?.exactPreview4k == true) {
+                    if (startCamera1Gpu(direct)) {
+                        return true
+                    }
+                }
+
+                val samsungS21 =
+                    Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
+                        Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
+                            .matches(Build.MODEL.orEmpty())
+                if (direct.legacyExact4k || samsungS21) {
+                    if (startLegacy(direct)) {
+                        return true
+                    }
+                }
+
+                // Last Camera1 fallback: preview/GPU without the OEM video-size key.
                 if (startCamera1Gpu(direct)) {
                     return true
                 }
@@ -247,7 +275,14 @@ class Front4kDirectStreamer(
                         val current = activeProfile
                         if (current == null) return
 
-                        val fallbackStarted = startGpuFallback(current)
+                        // If the preview/GPU route stalls, try the camera's
+                        // native 4K recording pipeline before falling back to Camera2.
+                        val nativeStarted = if (current.legacyCameraId >= 0) {
+                            startLegacy(current)
+                        } else {
+                            false
+                        }
+                        val fallbackStarted = nativeStarted || startGpuFallback(current)
                         if (!fallbackStarted) {
                             listener.onError("Camera1 GPU 4K frontal: $message")
                         }

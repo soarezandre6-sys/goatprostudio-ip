@@ -348,10 +348,10 @@ class Camera1GpuH264Streamer(
             applyParams.setPreviewSize(exactPreview.width, exactPreview.height)
         }
 
-        // Some Samsung camera1 stacks carry a separate recording-size key.
-        if (config.targetWidth == 3840 && config.targetHeight == 2160) {
-            runCatching { applyParams.set("video-size", "3840x2160") }
-        }
+        // Build 35: this is a PREVIEW/SurfaceTexture pipeline. Do not force
+        // Samsung's OEM video-size key here. Mixing a 4K recording size with a
+        // different preview stream can make the camera HAL deliver one frame and
+        // then stall. Native 4K recording is handled by Front4kDirectStreamer.
 
         if (applyParams.supportedPreviewFormats?.contains(ImageFormat.NV21) == true) {
             applyParams.previewFormat = ImageFormat.NV21

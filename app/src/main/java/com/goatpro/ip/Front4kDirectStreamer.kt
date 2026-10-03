@@ -548,7 +548,7 @@ class Front4kDirectStreamer(
         readerThread = Thread {
             val input = BufferedInputStream(
                 ParcelFileDescriptor.AutoCloseInputStream(readFd),
-                512 * 1024
+                64 * 1024
             )
             val packet = ByteArray(188)
             var videoPid = -1

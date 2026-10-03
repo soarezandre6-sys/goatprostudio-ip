@@ -44,7 +44,9 @@ class RtspH264Server(
         val sessionId: String
     ) {
         val writeLock = Any()
-        val sendQueue = ArrayBlockingQueue<PendingAccessUnit>(24)
+        // Build 44: Live View must prefer current frames over backlog.
+        // Four access units at 30 FPS cap app-side queueing near ~130 ms.
+        val sendQueue = ArrayBlockingQueue<PendingAccessUnit>(4)
         val senderRunning = AtomicBoolean(false)
 
         @Volatile
@@ -124,7 +126,9 @@ class RtspH264Server(
                             break
                         }
                         socket.tcpNoDelay = true
-                        runCatching { socket.sendBufferSize = 2 * 1024 * 1024 }
+                        // Build 44: 2 MB could hide almost a second of UHD H.264
+                        // in the TCP kernel buffer. Keep it small for live monitoring.
+                        runCatching { socket.sendBufferSize = 256 * 1024 }
                         runCatching { socket.trafficClass = 0x10 }
                         Thread {
                             handleClient(socket)
@@ -435,8 +439,12 @@ class RtspH264Server(
 
         session.clientRtpPort = rtpPort
         session.clientRtcpPort = rtcpPort
-        session.udpRtpSocket = DatagramSocket()
-        session.udpRtcpSocket = DatagramSocket()
+        session.udpRtpSocket = DatagramSocket().apply {
+            runCatching { sendBufferSize = 256 * 1024 }
+        }
+        session.udpRtcpSocket = DatagramSocket().apply {
+            runCatching { sendBufferSize = 64 * 1024 }
+        }
         session.transportMode = TransportMode.UDP
     }
 

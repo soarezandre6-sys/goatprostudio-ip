@@ -182,7 +182,7 @@ class MainActivity : AppCompatActivity() {
             override fun onVideoClientCountChanged(count: Int) {
                 if (selectedResolution.directFront4k) {
                     front4kDirectStreamer.setMjpegOutput(
-                        enabled = count > 0,
+                        enabled = count > 0 && rtspServer.activeClientCount() == 0,
                         quality = streamJpegQuality,
                         fps = (if (streamTargetFps > 0) streamTargetFps else 15)
                             .coerceIn(5, 15)
@@ -203,6 +203,14 @@ class MainActivity : AppCompatActivity() {
     private val rtspServer: RtspH264Server by lazy {
         RtspH264Server(8554, object : RtspH264Server.Listener {
             override fun onActiveClientCountChanged(count: Int) {
+                if (selectedResolution.directFront4k) {
+                    front4kDirectStreamer.setMjpegOutput(
+                        enabled = count == 0 && server.videoClientCount() > 0,
+                        quality = streamJpegQuality,
+                        fps = (if (streamTargetFps > 0) streamTargetFps else 15)
+                            .coerceIn(5, 15)
+                    )
+                }
                 if (count > 0) {
                     when {
                         highSpeedH264Streamer.isRunning() ||

@@ -1,9 +1,11 @@
 package com.goatpro.ip
 
+import android.graphics.ImageFormat
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
+import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
@@ -175,6 +177,59 @@ class H264Encoder(
         }
     }
 
+    /**
+     * Build 46 thermal fast path: feed CameraX YUV directly into MediaCodec.
+     * This avoids allocating a full 4K NV21 ByteArray and then converting/copying
+     * the same frame a second time before H.264 encode.
+     */
+    fun offerImageProxy(
+        image: ImageProxy,
+        presentationTimeNs: Long,
+        watermarkEnabled: Boolean
+    ): Boolean {
+        val encoder = codec ?: return false
+        if (!running.get()) return false
+        if (image.format != ImageFormat.YUV_420_888) return false
+        if (image.width != configuredWidth || image.height != configuredHeight) return false
+        if (image.planes.size < 3) return false
+
+        return try {
+            val index = encoder.dequeueInputBuffer(0)
+            if (index < 0) return false
+
+            val input = encoder.getInputBuffer(index) ?: run {
+                encoder.queueInputBuffer(index, 0, 0, presentationTimeNs / 1_000L, 0)
+                return false
+            }
+
+            val expected = image.width * image.height * 3 / 2
+            if (input.capacity() < expected) {
+                encoder.queueInputBuffer(index, 0, 0, presentationTimeNs / 1_000L, 0)
+                return false
+            }
+
+            input.clear()
+            writeImageProxyYuv(image, input, configuredColorFormat)
+            WatermarkOverlay.applyLuma(
+                input,
+                image.width,
+                image.height,
+                watermarkEnabled
+            )
+            input.position(expected)
+            encoder.queueInputBuffer(
+                index,
+                0,
+                expected,
+                presentationTimeNs / 1_000L,
+                0
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun requestKeyFrame() {
         val encoder = codec ?: return
         if (!running.get()) return
@@ -244,6 +299,72 @@ class H264Encoder(
             name = "goat-h264-drain"
             isDaemon = true
             start()
+        }
+    }
+
+    private fun writeImageProxyYuv(
+        image: ImageProxy,
+        output: ByteBuffer,
+        colorFormat: Int
+    ) {
+        val width = image.width
+        val height = image.height
+        val planes = image.planes
+
+        writePlaneSequential(planes[0], width, height, output)
+
+        val planar =
+            colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar ||
+                colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedPlanar
+
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        if (planar) {
+            writePlaneSequential(planes[1], chromaWidth, chromaHeight, output)
+            writePlaneSequential(planes[2], chromaWidth, chromaHeight, output)
+            return
+        }
+
+        // Existing semi-planar encoder path expects NV12 (UV). CameraX exposes
+        // U and V separately, often as pixelStride=2 views over NV21 memory.
+        // Interleave directly into the codec input buffer without an NV21 staging array.
+        val u = planes[1]
+        val v = planes[2]
+        val ub = u.buffer.duplicate()
+        val vb = v.buffer.duplicate()
+        for (row in 0 until chromaHeight) {
+            val uRow = row * u.rowStride
+            val vRow = row * v.rowStride
+            for (col in 0 until chromaWidth) {
+                output.put(ub.get(uRow + col * u.pixelStride))
+                output.put(vb.get(vRow + col * v.pixelStride))
+            }
+        }
+    }
+
+    private fun writePlaneSequential(
+        plane: ImageProxy.PlaneProxy,
+        width: Int,
+        height: Int,
+        output: ByteBuffer
+    ) {
+        val source = plane.buffer.duplicate()
+        if (plane.pixelStride == 1) {
+            for (row in 0 until height) {
+                val start = row * plane.rowStride
+                val rowBuffer = source.duplicate()
+                rowBuffer.position(start)
+                rowBuffer.limit(start + width)
+                output.put(rowBuffer)
+            }
+            return
+        }
+
+        for (row in 0 until height) {
+            val rowStart = row * plane.rowStride
+            for (col in 0 until width) {
+                output.put(source.get(rowStart + col * plane.pixelStride))
+            }
         }
     }
 

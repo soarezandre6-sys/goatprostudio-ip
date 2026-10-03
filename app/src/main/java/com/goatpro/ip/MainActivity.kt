@@ -11,6 +11,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
+import android.os.PowerManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Size
@@ -116,6 +117,9 @@ class MainActivity : AppCompatActivity() {
     private var watermarkEnabled = true
     private var preferredCameraKey: String? = null
     private var preferredResolutionKey: String? = null
+
+    private var cachedThermalStatus = PowerManager.THERMAL_STATUS_NONE
+    private var lastThermalCheckNs = 0L
 
     private var metricsWindowStartedNs = 0L
     private var analysisFrameCount = 0
@@ -2122,7 +2126,13 @@ class MainActivity : AppCompatActivity() {
                             val now = System.nanoTime()
                             recordAnalysisFrame(now)
 
-                            val targetFps = streamTargetFps
+                            val requestedFps =
+                                if (streamTargetFps > 0) streamTargetFps else DEFAULT_START_FPS
+                            val targetFps = if (selectedResolution.highResolution) {
+                                thermalAwareHighResolutionFps(requestedFps, now)
+                            } else {
+                                streamTargetFps
+                            }
                             val frameIntervalNs = if (targetFps > 0) {
                                 1_000_000_000L / targetFps
                             } else {
@@ -2147,18 +2157,74 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
 
-                            // CameraX rotates AUTO natively. The processed NV21 frame
-                            // is shared by MJPEG and the hardware H.264 path so we do not
-                            // perform the color/crop/rotation work twice.
                             val manualRotation = selectedRotationMode.offsetDegrees
-                            val prepared = ImageUtils.imageProxyToNv21(
-                                image = image,
-                                rotationDegrees = manualRotation
-                            )?.let { frame ->
-                                WatermarkOverlay.apply(
-                                    frame,
-                                    watermarkEnabled
-                                )
+                            val rtspActive = rtspServer.activeClientCount() > 0
+                            // Build 46: RTSP wins over MJPEG in 4K. Running both makes the
+                            // phone compress the same UHD frame twice and creates heat.
+                            val mjpegActive =
+                                server.videoClientCount() > 0 && !rtspActive
+                            val h264Fps =
+                                (if (targetFps > 0) targetFps else DEFAULT_START_FPS)
+                                    .coerceIn(5, 120)
+
+                            // Thermal fast path for rear 4K RTSP: CameraX -> MediaCodec
+                            // without the full-frame NV21 staging allocation/copy. AUTO
+                            // rotation is already applied by CameraX; manual rotations keep
+                            // the compatibility path below.
+                            val directRear4kRtsp =
+                                rtspActive &&
+                                    !selectedResolution.directFront4k &&
+                                    selectedResolution.size.width >= 3840 &&
+                                    selectedResolution.size.height >= 2160 &&
+                                    manualRotation == 0 &&
+                                    image.width == selectedResolution.size.width &&
+                                    image.height == selectedResolution.size.height
+
+                            if (directRear4kRtsp) {
+                                if (actualStreamWidth != image.width ||
+                                    actualStreamHeight != image.height
+                                ) {
+                                    actualStreamWidth = image.width
+                                    actualStreamHeight = image.height
+                                    runOnUiThread { updateStreamInfo() }
+                                }
+                                val bitrate =
+                                    if (streamBitrateBps > 0) streamBitrateBps
+                                    else H264Encoder.recommendedBitrate(
+                                        image.width,
+                                        image.height,
+                                        h264Fps,
+                                        streamJpegQuality
+                                    )
+                                if (h264Encoder.ensureStarted(
+                                        image.width,
+                                        image.height,
+                                        h264Fps,
+                                        bitrate
+                                    )
+                                ) {
+                                    h264Encoder.offerImageProxy(
+                                        image,
+                                        now,
+                                        watermarkEnabled
+                                    )
+                                }
+                                publishPerformanceStatsIfDue(System.nanoTime())
+                                return@setAnalyzer
+                            }
+
+                            // Compatibility path for MJPEG, manual rotation and lower
+                            // resolutions. Convert only when a consumer actually needs it.
+                            val needsPreparedFrame = mjpegActive || rtspActive
+                            val prepared = if (needsPreparedFrame) {
+                                ImageUtils.imageProxyToNv21(
+                                    image = image,
+                                    rotationDegrees = manualRotation
+                                )?.let { frame ->
+                                    WatermarkOverlay.apply(frame, watermarkEnabled)
+                                }
+                            } else {
+                                null
                             }
 
                             if (prepared != null) {
@@ -2170,9 +2236,7 @@ class MainActivity : AppCompatActivity() {
                                     runOnUiThread { updateStreamInfo() }
                                 }
 
-                                // Keep MJPEG for compatibility, but skip JPEG compression
-                                // when nobody is watching the MJPEG endpoint.
-                                if (server.videoClientCount() > 0) {
+                                if (mjpegActive) {
                                     val jpegStartedNs = System.nanoTime()
                                     val jpeg = ImageUtils.nv21ToJpeg(
                                         prepared,
@@ -2185,23 +2249,15 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
 
-                                // RTSP H.264 is encoded by MediaCodec. With only an RTSP
-                                // viewer connected there is no JPEG encode in the hot path.
-                                if (rtspServer.activeClientCount() > 0) {
-                                    val h264Fps =
-                                        (if (streamTargetFps > 0) streamTargetFps else 30)
-                                            .coerceIn(5, 120)
+                                if (rtspActive) {
                                     val bitrate =
-                                        if (streamBitrateBps > 0) {
-                                            streamBitrateBps
-                                        } else {
-                                            H264Encoder.recommendedBitrate(
-                                                prepared.width,
-                                                prepared.height,
-                                                h264Fps,
-                                                streamJpegQuality
-                                            )
-                                        }
+                                        if (streamBitrateBps > 0) streamBitrateBps
+                                        else H264Encoder.recommendedBitrate(
+                                            prepared.width,
+                                            prepared.height,
+                                            h264Fps,
+                                            streamJpegQuality
+                                        )
                                     if (h264Encoder.ensureStarted(
                                             prepared.width,
                                             prepared.height,
@@ -2211,9 +2267,9 @@ class MainActivity : AppCompatActivity() {
                                     ) {
                                         h264Encoder.offerNv21(prepared, now)
                                     }
-                                } else if (h264Encoder.isRunning()) {
-                                    h264Encoder.stop()
                                 }
+                            } else if (!rtspActive && h264Encoder.isRunning()) {
+                                h264Encoder.stop()
                             }
                             publishPerformanceStatsIfDue(System.nanoTime())
                         } finally {
@@ -2272,6 +2328,26 @@ class MainActivity : AppCompatActivity() {
                 setError("ERRO AO ABRIR A CÂMERA")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun thermalAwareHighResolutionFps(
+        requestedFps: Int,
+        nowNs: Long
+    ): Int {
+        if (Build.VERSION.SDK_INT < 29) return requestedFps.coerceIn(5, 60)
+        if (lastThermalCheckNs == 0L || nowNs - lastThermalCheckNs >= 1_000_000_000L) {
+            lastThermalCheckNs = nowNs
+            cachedThermalStatus = runCatching {
+                (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .currentThermalStatus
+            }.getOrDefault(PowerManager.THERMAL_STATUS_NONE)
+        }
+        val cap = when {
+            cachedThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE -> 20
+            cachedThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE -> 24
+            else -> 60
+        }
+        return minOf(requestedFps.coerceIn(5, 60), cap)
     }
 
     private fun resetPerformanceStats() {

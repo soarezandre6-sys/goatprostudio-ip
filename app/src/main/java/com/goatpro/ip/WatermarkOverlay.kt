@@ -1,5 +1,7 @@
 package com.goatpro.ip
 
+import java.nio.ByteBuffer
+
 /**
  * Lightweight GOAT Cam watermark rendered directly into the NV21 luminance plane.
  * This keeps the normal MJPEG/H.264 pipeline zero-copy after CameraX conversion.
@@ -56,6 +58,67 @@ object WatermarkOverlay {
             cursorX += glyphWidth + gap
         }
         return frame
+    }
+
+    /** Render the Free watermark directly into a MediaCodec input Y plane. */
+    fun applyLuma(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        enabled: Boolean
+    ) {
+        if (!enabled || width < 320 || height < 180) return
+
+        val scale = (width / 640).coerceIn(2, 6)
+        val glyphWidth = 5 * scale
+        val gap = scale
+        val textWidth = TEXT.length * (glyphWidth + gap) - gap
+        val textHeight = 7 * scale
+        val pad = 3 * scale
+        val margin = 8 * scale
+        val boxWidth = textWidth + pad * 2
+        val boxHeight = textHeight + pad * 2
+        val left = (width - boxWidth - margin).coerceAtLeast(0)
+        val top = (height - boxHeight - margin).coerceAtLeast(0)
+
+        for (y in top until (top + boxHeight).coerceAtMost(height)) {
+            val row = y * width
+            for (x in left until (left + boxWidth).coerceAtMost(width)) {
+                val index = row + x
+                val current = buffer.get(index).toInt() and 0xff
+                buffer.put(index, minOf(current, 70).toByte())
+            }
+        }
+
+        fun draw(rows: IntArray, x0: Int, y0: Int, yValue: Int) {
+            for (gy in rows.indices) {
+                val bits = rows[gy]
+                for (gx in 0 until 5) {
+                    if ((bits and (1 shl (4 - gx))) == 0) continue
+                    val px0 = x0 + gx * scale
+                    val py0 = y0 + gy * scale
+                    for (sy in 0 until scale) {
+                        val py = py0 + sy
+                        if (py !in 0 until height) continue
+                        val row = py * width
+                        for (sx in 0 until scale) {
+                            val px = px0 + sx
+                            if (px !in 0 until width) continue
+                            buffer.put(row + px, yValue.toByte())
+                        }
+                    }
+                }
+            }
+        }
+
+        var cursorX = left + pad
+        val originY = top + pad
+        for (ch in TEXT) {
+            val rows = glyphs[ch] ?: glyphs[' ']!!
+            draw(rows, cursorX + scale, originY + scale, 20)
+            draw(rows, cursorX, originY, 235)
+            cursorX += glyphWidth + gap
+        }
     }
 
     private fun drawGlyph(

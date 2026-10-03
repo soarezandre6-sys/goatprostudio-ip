@@ -124,6 +124,15 @@ class MainActivity : AppCompatActivity() {
     private var encodeTimeTotalNs = 0L
 
     @Volatile
+    private var front4kH264FrameCount = 0L
+
+    @Volatile
+    private var front4kLastFrameNs = 0L
+
+    @Volatile
+    private var front4kLastUiNs = 0L
+
+    @Volatile
     private var manualExposureEnabled = false
 
     @Volatile
@@ -357,6 +366,21 @@ class MainActivity : AppCompatActivity() {
                     keyFrame: Boolean,
                     codecConfig: Boolean
                 ) {
+                    if (!codecConfig && data.isNotEmpty()) {
+                        val now = System.nanoTime()
+                        front4kH264FrameCount += 1L
+                        front4kLastFrameNs = now
+                        if (now - front4kLastUiNs >= 1_000_000_000L) {
+                            front4kLastUiNs = now
+                            val count = front4kH264FrameCount
+                            val route = front4kDirectStreamer.lastSourceDescription
+                                .ifBlank { "rota 4K em inicialização" }
+                            runOnUiThread {
+                                performanceText.text =
+                                    "4K frontal • H.264 frames: $count • $route"
+                            }
+                        }
+                    }
                     rtspServer.onAccessUnit(
                         data,
                         presentationTimeUs,
@@ -389,7 +413,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                         performanceText.text =
-                            "4K frontal GPU • H.264 • " +
+                            "4K frontal • H.264 • " +
                                 fps + " FPS • " +
                                 String.format(
                                     java.util.Locale.US,
@@ -3090,6 +3114,9 @@ class MainActivity : AppCompatActivity() {
                 ",\"audioEnabled\":$audioEnabled" +
                 ",\"rtspClients\":${rtspServer.activeClientCount()}" +
                 ",\"h264Running\":${h264Encoder.isRunning() || front4kDirectStreamer.isRunning() || highSpeedH264Streamer.isRunning()}" +
+                ",\"front4kFrames\":$front4kH264FrameCount" +
+                ",\"front4kFrameAgeMs\":" +
+                    (if (front4kLastFrameNs > 0L) (System.nanoTime() - front4kLastFrameNs) / 1_000_000L else -1L) +
                 ",\"camera\":\"$cameraName\"" +
                 ",\"cameraKey\":\"$cameraKey\"" +
                 ",\"cameraOptionsCsv\":\"$cameraOptionsCsv\"" +
@@ -3248,6 +3275,9 @@ class MainActivity : AppCompatActivity() {
             )
 
         if (selectedResolution.directFront4k) {
+            front4kH264FrameCount = 0L
+            front4kLastFrameNs = 0L
+            front4kLastUiNs = 0L
             h264Encoder.stop()
             rtspServer.start()
             statusText.text = "INICIANDO 4K FRONTAL H.264…"

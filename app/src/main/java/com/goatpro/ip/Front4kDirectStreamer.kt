@@ -129,11 +129,22 @@ class Front4kDirectStreamer(
                     rotationOffsetDegrees = normalize(profile.rotationOffsetDegrees)
                 )
 
-                // Build 35: choose the route that matches what the camera really
-                // publishes. If 3840x2160 exists as a PREVIEW size, use the
-                // SurfaceTexture path (which can also feed MJPEG /video). If 4K is
-                // only a recording/video size, use MediaRecorder instead of forcing
-                // recording parameters into the preview path.
+                // Build 36: on Galaxy S21, force the native recording pipeline first.
+                // Build 35 still preferred the preview/GPU path whenever Camera1
+                // advertised a 3840x2160 preview size, which allowed the same frozen
+                // path to be selected again. The S21 front camera is a native 4K video
+                // camera, so MediaRecorder is now the first route on this device.
+                val samsungS21 =
+                    Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
+                        Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
+                            .matches(Build.MODEL.orEmpty())
+                if (samsungS21) {
+                    lastSourceDescription = "Samsung S21 • MediaRecorder 4K nativo"
+                    if (startLegacy(direct)) {
+                        return true
+                    }
+                }
+
                 val previewProbe = Camera1GpuH264Streamer.probe(
                     direct.legacyCameraId,
                     direct.width,
@@ -145,17 +156,13 @@ class Front4kDirectStreamer(
                     }
                 }
 
-                val samsungS21 =
-                    Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
-                        Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
-                            .matches(Build.MODEL.orEmpty())
-                if (direct.legacyExact4k || samsungS21) {
+                if (!samsungS21 && direct.legacyExact4k) {
                     if (startLegacy(direct)) {
                         return true
                     }
                 }
 
-                // Last Camera1 fallback: preview/GPU without the OEM video-size key.
+                // Last Camera1 fallback: preview/GPU without OEM recording keys.
                 if (startCamera1Gpu(direct)) {
                     return true
                 }

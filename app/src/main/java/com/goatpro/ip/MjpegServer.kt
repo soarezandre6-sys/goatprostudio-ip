@@ -37,6 +37,10 @@ class MjpegServer(
         latestFrame.set(jpeg)
     }
 
+    fun clearFrame() {
+        latestFrame.set(null)
+    }
+
     fun offerAudio(pcm16le: ByteArray) {
         latestAudio.set(AudioChunk(audioSequence.incrementAndGet(), pcm16le))
     }
@@ -80,7 +84,7 @@ class MjpegServer(
     private fun serve(socket: Socket) {
         try {
             socket.tcpNoDelay = true
-            socket.sendBufferSize = 128 * 1024
+            socket.sendBufferSize = 1024 * 1024
             socket.soTimeout = 10_000
 
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))

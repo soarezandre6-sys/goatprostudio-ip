@@ -165,6 +165,14 @@ class MainActivity : AppCompatActivity() {
     private val server by lazy {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {
+                if (selectedResolution.directFront4k) {
+                    front4kDirectStreamer.setMjpegOutput(
+                        enabled = count > 0,
+                        quality = streamJpegQuality,
+                        fps = (if (streamTargetFps > 0) streamTargetFps else 15)
+                            .coerceIn(5, 15)
+                    )
+                }
                 runOnUiThread { updateConnectionStatus(count) }
             }
 
@@ -355,6 +363,12 @@ class MainActivity : AppCompatActivity() {
                         keyFrame,
                         codecConfig
                     )
+                }
+
+                override fun onJpegFrame(data: ByteArray, width: Int, height: Int) {
+                    if (server.videoClientCount() > 0) {
+                        server.offerFrame(data)
+                    }
                 }
 
                 override fun onStarted(
@@ -3206,6 +3220,7 @@ class MainActivity : AppCompatActivity() {
         refreshAddress()
         nextEncodeDueNs = 0L
         resetPerformanceStats()
+        server.clearFrame()
         server.start()
         server.setAudioEnabled(audioEnabled)
 
@@ -3403,6 +3418,7 @@ class MainActivity : AppCompatActivity() {
         highSpeedH264Streamer.stop()
         backgroundH264Streamer.stop()
         backgroundDirectActive = false
+        front4kDirectStreamer.setMjpegOutput(false, streamJpegQuality, 10)
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()
@@ -3471,14 +3487,9 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAddress() {
         val ip = NetworkUtils.localIpv4()
         addressText.text = if (ip != null) {
-            if (selectedResolution.directFront4k) {
-                "4K frontal H.264 RTSP: rtsp://" +
-                    ip + ":8554/h264"
-            } else {
-                "MJPEG: http://" + ip +
-                    ":8080/video\nH.264 RTSP: rtsp://" +
-                    ip + ":8554/h264"
-            }
+            "MJPEG: http://" + ip +
+                ":8080/video\nH.264 RTSP: rtsp://" +
+                ip + ":8554/h264"
         } else {
             "Sem endereço Wi-Fi disponível"
         }
@@ -3502,7 +3513,7 @@ class MainActivity : AppCompatActivity() {
         if (selectedResolution.directFront4k) {
             streamInfoText.text =
                 dimensions + " • " + fpsLabel +
-                    " • H.264 hardware • 4K frontal"
+                    " • H.264 hardware + MJPEG HTTP • 4K frontal"
             return
         }
 
@@ -3532,14 +3543,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         val urls =
-            if (selectedResolution.directFront4k) {
-                "4K frontal H.264 RTSP: rtsp://" +
-                    ip + ":8554/h264"
-            } else {
-                "MJPEG: http://" + ip +
-                    ":8080/video\nH.264 RTSP: rtsp://" +
-                    ip + ":8554/h264"
-            }
+            "MJPEG: http://" + ip +
+                ":8080/video\nH.264 RTSP: rtsp://" +
+                ip + ":8554/h264"
 
         val clipboard =
             getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -3548,11 +3554,7 @@ class MainActivity : AppCompatActivity() {
         )
         Toast.makeText(
             this,
-            if (selectedResolution.directFront4k) {
-                "Endereço 4K frontal H.264 copiado"
-            } else {
-                "Endereços MJPEG e H.264 copiados"
-            },
+            "Endereços MJPEG e H.264 copiados",
             Toast.LENGTH_SHORT
         ).show()
     }

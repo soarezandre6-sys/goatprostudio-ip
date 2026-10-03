@@ -1,6 +1,7 @@
 package com.goatpro.ip
 
 import android.content.Context
+import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.Camera
 import android.media.MediaCodec
@@ -79,6 +80,7 @@ class Camera1GpuH264Streamer(
             exactVideo4k: Boolean
         )
 
+        fun onJpegFrame(data: ByteArray, width: Int, height: Int) = Unit
         fun onError(message: String)
         fun onStopped()
     }
@@ -91,6 +93,30 @@ class Camera1GpuH264Streamer(
     private var workerHandler: Handler? = null
     private var camera: Camera? = null
     private var cameraTexture: SurfaceTexture? = null
+
+    @Volatile
+    private var mjpegEnabled = false
+
+    @Volatile
+    private var mjpegQuality = 50
+
+    @Volatile
+    private var mjpegFps = 10
+
+    @Volatile
+    private var mjpegCallbackInstalled = false
+
+    @Volatile
+    private var nextMjpegDueNs = 0L
+
+    private data class MjpegFrame(
+        val data: ByteArray,
+        val width: Int,
+        val height: Int
+    )
+
+    private val mjpegQueue = ArrayBlockingQueue<MjpegFrame>(1)
+    private var mjpegThread: Thread? = null
 
     private var codec: MediaCodec? = null
     private var encoderSurface: Surface? = null
@@ -170,7 +196,9 @@ class Camera1GpuH264Streamer(
         lastDeliveryCompletedNs = 0L
         droppedDeliveryFrames = 0L
         lastPresentationNs = 0L
+        nextMjpegDueNs = 0L
         deliveryQueue.clear()
+        mjpegQueue.clear()
 
         val thread = HandlerThread("goat-camera1-gpu-h264").apply { start() }
         val handler = Handler(thread.looper)
@@ -228,6 +256,14 @@ class Camera1GpuH264Streamer(
             start()
         }
         return true
+    }
+
+    fun setMjpegOutput(enabled: Boolean, quality: Int = 50, fps: Int = 10) {
+        mjpegEnabled = enabled
+        mjpegQuality = quality.coerceIn(20, 90)
+        mjpegFps = fps.coerceIn(1, 15)
+        if (!enabled) nextMjpegDueNs = 0L
+        workerHandler?.post { updateMjpegPreviewCallback() }
     }
 
     fun requestKeyFrame() {
@@ -317,6 +353,10 @@ class Camera1GpuH264Streamer(
             runCatching { applyParams.set("video-size", "3840x2160") }
         }
 
+        if (applyParams.supportedPreviewFormats?.contains(ImageFormat.NV21) == true) {
+            applyParams.previewFormat = ImageFormat.NV21
+        }
+
         opened.parameters = applyParams
 
         val texture = cameraTexture
@@ -324,6 +364,82 @@ class Camera1GpuH264Streamer(
         texture.setDefaultBufferSize(selectedSource.width, selectedSource.height)
         opened.setPreviewTexture(texture)
         opened.startPreview()
+        updateMjpegPreviewCallback()
+    }
+
+    private fun ensureMjpegThread() {
+        if (mjpegThread?.isAlive == true) return
+        mjpegThread = Thread {
+            while (!stopping.get() && (starting.get() || running.get() || mjpegQueue.isNotEmpty())) {
+                val frame = try {
+                    mjpegQueue.poll(100, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    null
+                } ?: continue
+
+                try {
+                    if (mjpegEnabled) {
+                        val jpeg = ImageUtils.nv21ToJpeg(
+                            ImageUtils.Nv21Frame(frame.data, frame.width, frame.height),
+                            mjpegQuality
+                        )
+                        if (jpeg != null && mjpegEnabled) {
+                            listener.onJpegFrame(jpeg.bytes, jpeg.width, jpeg.height)
+                        }
+                    }
+                } catch (_: Exception) {
+                    // MJPEG is compatibility output; never stop H.264 because JPEG failed.
+                } finally {
+                    runCatching { camera?.addCallbackBuffer(frame.data) }
+                }
+            }
+        }.apply {
+            name = "goat-camera1-mjpeg"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun updateMjpegPreviewCallback() {
+        val opened = camera ?: return
+        if (!mjpegEnabled) {
+            if (mjpegCallbackInstalled) {
+                runCatching { opened.setPreviewCallbackWithBuffer(null) }
+                mjpegCallbackInstalled = false
+            }
+            return
+        }
+        if (mjpegCallbackInstalled) return
+
+        val params = runCatching { opened.parameters }.getOrNull() ?: return
+        if (params.previewFormat != ImageFormat.NV21) return
+        val size = params.previewSize ?: return
+        val bitsPerPixel = ImageFormat.getBitsPerPixel(ImageFormat.NV21)
+        val bufferSize = (size.width * size.height * bitsPerPixel / 8).coerceAtLeast(1)
+
+        ensureMjpegThread()
+        repeat(4) {
+            runCatching { opened.addCallbackBuffer(ByteArray(bufferSize)) }
+        }
+        opened.setPreviewCallbackWithBuffer callback@ { data, cam ->
+            if (!mjpegEnabled || stopping.get()) {
+                runCatching { cam.addCallbackBuffer(data) }
+                return@callback
+            }
+
+            val now = System.nanoTime()
+            val intervalNs = 1_000_000_000L / mjpegFps.coerceAtLeast(1)
+            if (nextMjpegDueNs != 0L && now < nextMjpegDueNs) {
+                runCatching { cam.addCallbackBuffer(data) }
+                return@callback
+            }
+            nextMjpegDueNs = now + intervalNs
+
+            if (!mjpegQueue.offer(MjpegFrame(data, size.width, size.height))) {
+                runCatching { cam.addCallbackBuffer(data) }
+            }
+        }
+        mjpegCallbackInstalled = true
     }
 
     private fun setupEncoder(width: Int, height: Int, fps: Int, bitrate: Int) {
@@ -697,8 +813,14 @@ class Camera1GpuH264Streamer(
         val wasActive = starting.getAndSet(false) || running.getAndSet(false)
         stopping.set(true)
 
+        mjpegEnabled = false
         val localCamera = camera
         camera = null
+        runCatching { localCamera?.setPreviewCallbackWithBuffer(null) }
+        mjpegCallbackInstalled = false
+        runCatching { mjpegThread?.interrupt() }
+        mjpegThread = null
+        mjpegQueue.clear()
         runCatching { localCamera?.setPreviewCallback(null) }
         runCatching { localCamera?.stopPreview() }
         runCatching { localCamera?.release() }

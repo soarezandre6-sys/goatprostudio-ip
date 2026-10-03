@@ -44,6 +44,7 @@ class Front4kDirectStreamer(
             keyFrame: Boolean,
             codecConfig: Boolean
         )
+        fun onJpegFrame(data: ByteArray, width: Int, height: Int) = Unit
         fun onStarted(width: Int, height: Int, fps: Int, bitrate: Int)
         fun onError(message: String)
         fun onStopped()
@@ -65,6 +66,15 @@ class Front4kDirectStreamer(
     @Volatile
     var lastSourceDescription: String = ""
         private set
+
+    @Volatile
+    private var mjpegEnabled = false
+
+    @Volatile
+    private var mjpegQuality = 50
+
+    @Volatile
+    private var mjpegFps = 10
 
     private var camera: Camera? = null
     private var previewTexture: SurfaceTexture? = null
@@ -96,6 +106,13 @@ class Front4kDirectStreamer(
         camera1GpuDelegate?.requestKeyFrame()
         gpuDelegate?.requestKeyFrame()
         // MediaRecorder fallback has no public force-IDR API.
+    }
+
+    fun setMjpegOutput(enabled: Boolean, quality: Int = 50, fps: Int = 10) {
+        mjpegEnabled = enabled
+        mjpegQuality = quality.coerceIn(20, 90)
+        mjpegFps = fps.coerceIn(1, 15)
+        camera1GpuDelegate?.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
     }
 
     fun start(profile: Profile): Boolean {
@@ -191,6 +208,10 @@ class Front4kDirectStreamer(
                     )
                 }
 
+                override fun onJpegFrame(data: ByteArray, width: Int, height: Int) {
+                    listener.onJpegFrame(data, width, height)
+                }
+
                 override fun onStarted(
                     width: Int,
                     height: Int,
@@ -237,6 +258,7 @@ class Front4kDirectStreamer(
             }
         )
         camera1GpuDelegate = local
+        local.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
 
         val started = local.start(
             Camera1GpuH264Streamer.Config(

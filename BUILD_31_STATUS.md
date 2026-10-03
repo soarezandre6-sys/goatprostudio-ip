@@ -1,6 +1,6 @@
 # GOAT Cam Build 31
 
-Status: nova rota 4K frontal implementada e compilação Kotlin validada com sucesso; APK de teste ainda não gerado.
+Status: nova rota 4K frontal implementada; compilação Kotlin e APK de teste gerados com sucesso.
 
 ## Problema vindo da Build 30
 - O 4K frontal continuava travando no Galaxy S21.
@@ -34,10 +34,18 @@ A rota registra em `lastSourceDescription` qual fonte foi usada, por exemplo:
 - `video-size 4K`
 - `composição GPU`
 
+## Build gerada
+- Workflow Android Debug APK: SUCCESS.
+- Run ID: `37085616614`.
+- Artifact ID: `11259719293`.
+- Artifact: `goat-cam-build-31-debug`.
+- APK local entregue: `GOAT-Cam-Build-31-Teste.apk`.
+- SHA-256 do APK: `2e79fbe7e941daa81f3d6ad2d6ec1b5ee4bd49c7a5167462d29a13be0009926d`.
+
 ## Processo
 - Build 30 preservada.
 - Checkpoint: `checkpoint-build30-before-camera1-gpu-2026-10-02`.
 - Branch atual: `build-31-goat-cam`.
 - Release não alterada.
 - Validação `:app:compileDebugKotlin`: SUCCESS.
-- APK Build 31 ainda não gerado.
+- APK Build 31: SUCCESS.

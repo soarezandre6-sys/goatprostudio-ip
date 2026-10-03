@@ -133,6 +133,12 @@ class MainActivity : AppCompatActivity() {
     private var front4kLastUiNs = 0L
 
     @Volatile
+    private var front4kWindowStartedNs = 0L
+
+    @Volatile
+    private var front4kWindowFrames = 0L
+
+    @Volatile
     private var manualExposureEnabled = false
 
     @Volatile
@@ -370,14 +376,23 @@ class MainActivity : AppCompatActivity() {
                         val now = System.nanoTime()
                         front4kH264FrameCount += 1L
                         front4kLastFrameNs = now
+                        if (front4kWindowStartedNs == 0L) {
+                            front4kWindowStartedNs = now
+                            front4kWindowFrames = 0L
+                        }
+                        front4kWindowFrames += 1L
                         if (now - front4kLastUiNs >= 1_000_000_000L) {
                             front4kLastUiNs = now
-                            val count = front4kH264FrameCount
+                            val elapsed = (now - front4kWindowStartedNs).coerceAtLeast(1L)
+                            val realFps = front4kWindowFrames * 1_000_000_000.0 / elapsed
+                            front4kWindowStartedNs = now
+                            front4kWindowFrames = 0L
                             val route = front4kDirectStreamer.lastSourceDescription
                                 .ifBlank { "rota 4K em inicialização" }
                             runOnUiThread {
                                 performanceText.text =
-                                    "4K frontal • H.264 frames: $count • $route"
+                                    "4K frontal • %.1f FPS reais • $route"
+                                        .format(java.util.Locale.US, realFps)
                             }
                         }
                     }
@@ -3279,6 +3294,8 @@ class MainActivity : AppCompatActivity() {
             front4kH264FrameCount = 0L
             front4kLastFrameNs = 0L
             front4kLastUiNs = 0L
+            front4kWindowStartedNs = 0L
+            front4kWindowFrames = 0L
             h264Encoder.stop()
             rtspServer.start()
             statusText.text = "INICIANDO 4K FRONTAL H.264…"

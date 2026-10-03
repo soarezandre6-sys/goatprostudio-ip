@@ -125,7 +125,7 @@ class Front4kDirectStreamer(
             if (effective != null && effective.legacyCameraId >= 0) {
                 val direct = effective.copy(
                     fps = profile.fps.coerceIn(5, 60),
-                    bitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000),
+                    bitrate = profile.bitrate.coerceIn(8_000_000, 18_000_000),
                     deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                     rotationOffsetDegrees = normalize(profile.rotationOffsetDegrees)
                 )
@@ -322,7 +322,7 @@ class Front4kDirectStreamer(
 
     private fun startLegacy(profile: Profile): Boolean {
         val safeFps = supportedLegacyFps(profile.legacyCameraId, profile.fps)
-        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000)
+        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 18_000_000)
 
         return try {
             starting.set(true)
@@ -353,6 +353,25 @@ class Front4kDirectStreamer(
                 ) == true
             ) {
                 params.focusMode = Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
+            }
+
+            val targetFps1000 = safeFps * 1000
+            val preferredFpsRange = params.supportedPreviewFpsRange.orEmpty()
+                .filter { range ->
+                    range.size >= 2 &&
+                        range[0] <= targetFps1000 &&
+                        range[1] >= targetFps1000
+                }
+                .minWithOrNull(
+                    compareBy<IntArray> { range -> range[1] - range[0] }
+                        .thenByDescending { range -> range[0] }
+                )
+            preferredFpsRange?.let { range ->
+                runCatching { params.setPreviewFpsRange(range[0], range[1]) }
+            }
+
+            if (params.supportedColorEffects?.contains(Camera.Parameters.EFFECT_NONE) == true) {
+                runCatching { params.colorEffect = Camera.Parameters.EFFECT_NONE }
             }
 
             params.preferredPreviewSizeForVideo?.let { preferred ->
@@ -406,7 +425,12 @@ class Front4kDirectStreamer(
             starting.set(false)
             running.set(true)
             lastSourceDescription =
-                if (exact4k) "Camera1 supportedVideoSizes 3840x2160 → H.264" else "Camera1 OEM video-size 3840x2160 → H.264"
+                (if (exact4k) {
+                    "Camera1 supportedVideoSizes 3840x2160 → H.264"
+                } else {
+                    "Camera1 OEM video-size 3840x2160 → H.264"
+                }) + " • ${safeFps} FPS alvo • " +
+                    String.format(java.util.Locale.US, "%.1f Mbps", safeBitrate / 1_000_000.0)
 
             Thread {
                 try {
@@ -528,7 +552,7 @@ class Front4kDirectStreamer(
             )
             val packet = ByteArray(188)
             var videoPid = -1
-            var pesData = ByteArrayOutputStream(512 * 1024)
+            val pesData = ByteArrayOutputStream(256 * 1024)
             var pesPtsUs = 0L
             var havePes = false
 
@@ -552,7 +576,7 @@ class Front4kDirectStreamer(
                         false
                     )
                 }
-                pesData = ByteArrayOutputStream(512 * 1024)
+                pesData.reset()
             }
 
             try {

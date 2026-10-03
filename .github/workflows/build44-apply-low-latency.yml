@@ -31,9 +31,11 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Validate Kotlin compile only
-        run: ./gradlew :app:compileDebugKotlin --no-daemon
+        run: gradle :app:compileDebugKotlin --no-daemon
 
       - name: Commit validated Build 44 code
         run: |

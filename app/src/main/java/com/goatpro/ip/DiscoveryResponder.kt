@@ -2,7 +2,7 @@ package com.goatpro.ip
 
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 class DiscoveryResponder(
@@ -23,7 +23,7 @@ class DiscoveryResponder(
                     socket = sock
                     sock.reuseAddress = true
                     sock.broadcast = true
-                    sock.bind(java.net.InetSocketAddress(DISCOVERY_PORT))
+                    sock.bind(InetSocketAddress(DISCOVERY_PORT))
                     val buffer = ByteArray(1024)
                     while (running.get()) {
                         val packet = DatagramPacket(buffer, buffer.size)
@@ -31,10 +31,14 @@ class DiscoveryResponder(
                         val request = String(packet.data, 0, packet.length, Charsets.UTF_8).trim()
                         if (request != DISCOVERY_REQUEST) continue
 
-                        val ip = NetworkUtils.localIpv4() ?: continue
+                        val ipv4 = NetworkUtils.localIpv4()
+                        val ipv6 = NetworkUtils.localIpv6()
+                        val primary = ipv4 ?: ipv6 ?: continue
                         val response = buildString {
                             append("GOAT_PRO_IP_V1")
-                            append("|ip=").append(ip)
+                            append("|ip=").append(primary)
+                            append("|ipv4=").append(ipv4.orEmpty())
+                            append("|ipv6=").append(ipv6.orEmpty())
                             append("|port=").append(httpPort)
                             append("|video=/video")
                             append("|rtspPort=8554")
@@ -44,13 +48,13 @@ class DiscoveryResponder(
                             append("|audio=/audio.pcm")
                             append("|streaming=").append(if (isStreaming()) "1" else "0")
                             append("|audioEnabled=").append(if (isAudioEnabled()) "1" else "0")
-                            append("|version=1.0.0")
+                            append("|version=1.1.0")
                         }.toByteArray(Charsets.UTF_8)
 
                         val reply = DatagramPacket(
                             response,
                             response.size,
-                            packet.address ?: InetAddress.getByName(ip),
+                            packet.address,
                             packet.port
                         )
                         sock.send(reply)

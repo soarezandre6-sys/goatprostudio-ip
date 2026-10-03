@@ -5,6 +5,7 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -86,8 +87,8 @@ class RtspH264Server(
     private val activeCount = AtomicInteger(0)
     private val clients = CopyOnWriteArrayList<ClientSession>()
 
-    private var serverSocket: ServerSocket? = null
-    private var acceptThread: Thread? = null
+    private val serverSockets = CopyOnWriteArrayList<ServerSocket>()
+    private val acceptThreads = CopyOnWriteArrayList<Thread>()
 
     @Volatile
     private var latestSps: ByteArray? = null
@@ -97,12 +98,26 @@ class RtspH264Server(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        acceptThread = Thread {
-            try {
-                ServerSocket(port).also { server ->
-                    server.reuseAddress = true
-                    serverSocket = server
-                    while (running.get()) {
+
+        val boundServers = NetworkUtils.localInetAddresses().mapNotNull { address ->
+            runCatching {
+                ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(address, port))
+                }
+            }.getOrNull()
+        }
+
+        if (boundServers.isEmpty()) {
+            running.set(false)
+            return
+        }
+
+        serverSockets.addAll(boundServers)
+        boundServers.forEachIndexed { index, server ->
+            Thread {
+                try {
+                    while (running.get() && !server.isClosed) {
                         val socket = try {
                             server.accept()
                         } catch (_: SocketException) {
@@ -119,25 +134,27 @@ class RtspH264Server(
                             start()
                         }
                     }
+                } catch (_: Exception) {
+                    // One address family may disappear while the other remains valid.
+                } finally {
+                    runCatching { server.close() }
+                    serverSockets.remove(server)
                 }
-            } catch (_: Exception) {
-                // Port unavailable or normal shutdown.
-            } finally {
-                running.set(false)
-                runCatching { serverSocket?.close() }
-                serverSocket = null
+            }.apply {
+                name = "goat-rtsp-accept-$index"
+                isDaemon = true
+                acceptThreads += this
+                start()
             }
-        }.apply {
-            name = "goat-rtsp-accept"
-            isDaemon = true
-            start()
         }
     }
 
     fun stop() {
         if (!running.compareAndSet(true, false)) return
-        runCatching { serverSocket?.close() }
-        serverSocket = null
+        serverSockets.forEach { server -> runCatching { server.close() } }
+        serverSockets.clear()
+        acceptThreads.forEach { thread -> runCatching { thread.interrupt() } }
+        acceptThreads.clear()
         clients.forEach { it.close() }
         clients.clear()
         activeCount.set(0)
@@ -148,7 +165,7 @@ class RtspH264Server(
 
     fun activeClientCount(): Int = activeCount.get()
 
-    fun url(ip: String): String = "rtsp://$ip:$port/h264"
+    fun url(ip: String): String = "rtsp://${NetworkUtils.urlHost(ip)}:$port/h264"
 
     fun onAccessUnit(
         data: ByteArray,
@@ -423,17 +440,24 @@ class RtspH264Server(
         session.transportMode = TransportMode.UDP
     }
 
-    private fun buildSdp(localIp: String): String =
-        "v=0\r\n" +
-            "o=- 0 0 IN IP4 $localIp\r\n" +
-            "s=GOAT PRO IP H264\r\n" +
-            "c=IN IP4 $localIp\r\n" +
+    private fun buildSdp(localIp: String): String {
+        val address = NetworkUtils.sdpAddress(localIp)
+        val family = if (address.contains(':')) "IP6" else "IP4"
+        return "v=0
+" +
+            "o=- 0 0 IN $family $address
+" +
+            "s=GOAT PRO IP H264
+" +
+            "c=IN $family $address
+" +
             "t=0 0\r\n" +
             "a=control:*\r\n" +
             "m=video 0 RTP/AVP 96\r\n" +
             "a=rtpmap:96 H264/90000\r\n" +
             "a=fmtp:96 packetization-mode=1\r\n" +
             "a=control:trackID=0\r\n"
+    }
 
     private fun respond(
         client: ClientSession,

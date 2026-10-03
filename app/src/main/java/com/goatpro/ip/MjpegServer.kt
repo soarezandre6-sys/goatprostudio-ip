@@ -3,6 +3,7 @@ package com.goatpro.ip
 import java.io.BufferedOutputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
@@ -30,8 +31,8 @@ class MjpegServer(
     private val audioEnabled = AtomicBoolean(false)
     private val clients = CopyOnWriteArrayList<Socket>()
     private val videoClients = CopyOnWriteArrayList<Socket>()
-    private var serverThread: Thread? = null
-    private var serverSocket: ServerSocket? = null
+    private val serverThreads = CopyOnWriteArrayList<Thread>()
+    private val serverSockets = CopyOnWriteArrayList<ServerSocket>()
 
     fun offerFrame(jpeg: ByteArray) {
         latestFrame.set(jpeg)
@@ -54,11 +55,26 @@ class MjpegServer(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        serverThread = Thread {
-            try {
-                ServerSocket(port).also { serverSocket = it }.use { server ->
-                    server.reuseAddress = true
-                    while (running.get()) {
+
+        val boundServers = NetworkUtils.localInetAddresses().mapNotNull { address ->
+            runCatching {
+                ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(address, port))
+                }
+            }.getOrNull()
+        }
+
+        if (boundServers.isEmpty()) {
+            running.set(false)
+            return
+        }
+
+        serverSockets.addAll(boundServers)
+        boundServers.forEachIndexed { index, server ->
+            Thread {
+                try {
+                    while (running.get() && !server.isClosed) {
                         val socket = server.accept()
                         clients += socket
                         Thread { serve(socket) }.apply {
@@ -67,17 +83,18 @@ class MjpegServer(
                             start()
                         }
                     }
+                } catch (_: Exception) {
+                    // stop() closes accept(); individual address failures do not stop the other stack.
+                } finally {
+                    runCatching { server.close() }
+                    serverSockets.remove(server)
                 }
-            } catch (_: Exception) {
-                // stop() closes accept(); other failures end the server thread.
-            } finally {
-                running.set(false)
-                closeAllClients()
+            }.apply {
+                name = "goat-ip-server-$index"
+                isDaemon = true
+                serverThreads += this
+                start()
             }
-        }.apply {
-            name = "goat-ip-server"
-            isDaemon = true
-            start()
         }
     }
 
@@ -773,9 +790,11 @@ class MjpegServer(
 
     fun stop() {
         if (!running.compareAndSet(true, false)) return
-        runCatching { serverSocket?.close() }
+        serverSockets.forEach { server -> runCatching { server.close() } }
+        serverSockets.clear()
+        serverThreads.forEach { thread -> runCatching { thread.interrupt() } }
+        serverThreads.clear()
         closeAllClients()
-        serverSocket = null
         latestFrame.set(null)
         latestAudio.set(null)
     }

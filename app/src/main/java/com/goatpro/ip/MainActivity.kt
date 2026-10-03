@@ -3230,12 +3230,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startStreaming() {
-        val ip = NetworkUtils.localIpv4()
-        if (ip == null) {
+        val ipv4 = NetworkUtils.localIpv4()
+        val ipv6 = NetworkUtils.localIpv6()
+        if (ipv4 == null && ipv6 == null) {
             setError("CONECTE O CELULAR A UMA REDE WI-FI")
             Toast.makeText(
                 this,
-                "Nenhum endereço IPv4 local encontrado.",
+                "Nenhum endereço IPv4/IPv6 local encontrado.",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -3515,11 +3516,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshAddress() {
-        val ip = NetworkUtils.localIpv4()
-        addressText.text = if (ip != null) {
-            "MJPEG: http://" + ip +
-                ":8080/video\nH.264 RTSP: rtsp://" +
-                ip + ":8554/h264"
+        val ipv4 = NetworkUtils.localIpv4()
+        val ipv6 = NetworkUtils.localIpv6()
+        val lines = mutableListOf<String>()
+
+        ipv4?.let { address ->
+            val host = NetworkUtils.urlHost(address)
+            lines += "IPv4 MJPEG: http://$host:8080/video"
+            lines += "IPv4 RTSP: rtsp://$host:8554/h264"
+        }
+        ipv6?.let { address ->
+            val host = NetworkUtils.urlHost(address)
+            lines += "IPv6 MJPEG: http://$host:8080/video"
+            lines += "IPv6 RTSP: rtsp://$host:8554/h264"
+        }
+
+        addressText.text = if (lines.isNotEmpty()) {
+            lines.joinToString("
+")
         } else {
             "Sem endereço Wi-Fi disponível"
         }
@@ -3562,8 +3576,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun copyAddressToClipboard() {
-        val ip = NetworkUtils.localIpv4()
-        if (ip == null) {
+        val ipv4 = NetworkUtils.localIpv4()
+        val ipv6 = NetworkUtils.localIpv6()
+        if (ipv4 == null && ipv6 == null) {
             Toast.makeText(
                 this,
                 "Conecte o celular ao Wi-Fi primeiro.",
@@ -3572,19 +3587,28 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val urls =
-            "MJPEG: http://" + ip +
-                ":8080/video\nH.264 RTSP: rtsp://" +
-                ip + ":8554/h264"
+        val lines = mutableListOf<String>()
+        ipv4?.let { address ->
+            val host = NetworkUtils.urlHost(address)
+            lines += "IPv4 MJPEG: http://$host:8080/video"
+            lines += "IPv4 RTSP: rtsp://$host:8554/h264"
+        }
+        ipv6?.let { address ->
+            val host = NetworkUtils.urlHost(address)
+            lines += "IPv6 MJPEG: http://$host:8080/video"
+            lines += "IPv6 RTSP: rtsp://$host:8554/h264"
+        }
+        val urls = lines.joinToString("
+")
 
         val clipboard =
             getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(
-            ClipData.newPlainText("GOAT Cam", urls)
+            ClipData.newPlainText("GOAT Cam endereços", urls)
         )
         Toast.makeText(
             this,
-            "Endereços MJPEG e H.264 copiados",
+            "Endereços IPv4/IPv6 copiados.",
             Toast.LENGTH_SHORT
         ).show()
     }

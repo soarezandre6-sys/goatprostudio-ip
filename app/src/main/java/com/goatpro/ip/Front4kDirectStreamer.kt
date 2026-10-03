@@ -6,6 +6,7 @@ import android.hardware.Camera
 import android.media.CamcorderProfile
 import android.media.MediaRecorder
 import android.os.ParcelFileDescriptor
+import android.os.Build
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -92,7 +93,7 @@ class Front4kDirectStreamer(
             activeProfile = profile
 
             val effective = profileFor(context, profile.cameraId)
-            if (effective?.legacyExact4k == true && effective.legacyCameraId >= 0) {
+            if (effective != null && effective.legacyCameraId >= 0) {
                 return startLegacy(
                     effective.copy(
                         fps = profile.fps.coerceIn(5, 60),
@@ -156,10 +157,11 @@ class Front4kDirectStreamer(
             val params = opened.parameters
             val videoSizes = params.supportedVideoSizes ?: params.supportedPreviewSizes
             val exact4k = videoSizes?.any { it.width == 3840 && it.height == 2160 } == true
+            // IP Webcam proves this Samsung can record/stream front 3840x2160 even
+            // when some public capability lists omit it. Camera1 accepts OEM string
+            // parameters, so try the legacy video-size key before giving up.
             if (!exact4k) {
-                throw IllegalStateException(
-                    "Camera1 deixou de anunciar 3840x2160 ao abrir a frontal."
-                )
+                runCatching { params.set("video-size", "3840x2160") }
             }
 
             params.setRecordingHint(true)
@@ -222,7 +224,7 @@ class Front4kDirectStreamer(
             starting.set(false)
             running.set(true)
             lastSourceDescription =
-                "Camera1 supportedVideoSizes 3840x2160 → H.264 MediaRecorder"
+                if (exact4k) "Camera1 supportedVideoSizes 3840x2160 → H.264" else "Camera1 OEM video-size 3840x2160 → H.264"
 
             Thread {
                 try {
@@ -259,7 +261,7 @@ class Front4kDirectStreamer(
             context,
             profile.cameraId,
             requestedFps = 30,
-            preferLargestSource = false
+            preferLargestSource = true
         ) ?: run {
             listener.onError("Frontal não expôs fonte pública utilizável.")
             return false
@@ -586,6 +588,7 @@ class Front4kDirectStreamer(
             if (preferred != null) candidates.add(preferred)
 
             val info = Camera.CameraInfo()
+            var firstLegacyFrontId = -1
             for (id in 0 until Camera.getNumberOfCameras()) {
                 val front = runCatching {
                     Camera.getCameraInfo(id, info)
@@ -601,6 +604,7 @@ class Front4kDirectStreamer(
                     cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
                 }.getOrDefault(false)
                 if (!validFront) continue
+                if (firstLegacyFrontId < 0) firstLegacyFrontId = legacyId
 
                 val exactLegacy4k = try {
                     val opened = Camera.open(legacyId)
@@ -652,11 +656,32 @@ class Front4kDirectStreamer(
                 }
             }
 
+            val samsungS21 =
+                Build.MANUFACTURER.equals("samsung", ignoreCase = true) &&
+                    Regex("^SM-G99[0168].*", RegexOption.IGNORE_CASE)
+                        .matches(Build.MODEL.orEmpty())
+
+            // The same Galaxy S21 was demonstrated running IP Webcam at
+            // 3840x2160 H.264 on the front camera. Do not hide the option just
+            // because Camera1/Camera2 capability lists omit the exact size.
+            if (samsungS21 && firstLegacyFrontId >= 0) {
+                return Profile(
+                    cameraId = cameraId,
+                    width = 3840,
+                    height = 2160,
+                    fps = 30,
+                    bitrate = 18_000_000,
+                    fromOfficialProfile = false,
+                    legacyCameraId = firstLegacyFrontId,
+                    legacyExact4k = false
+                )
+            }
+
             val probe = GpuCameraH264Streamer.probe(
                 context,
                 cameraId,
                 requestedFps = 30,
-                preferLargestSource = false
+                preferLargestSource = true
             ) ?: return null
             val pixels = probe.sourceSize.width.toLong() * probe.sourceSize.height.toLong()
             if (pixels < MIN_FRONT_UHD_SOURCE_PIXELS) return null

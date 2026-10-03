@@ -325,10 +325,10 @@ class MjpegServer(
                       <span>Bitrate H.264</span>
                       <span class="rangeValue" id="bitrateText">Automático</span>
                     </label>
-                    <input id="bitrateKbps" type="range" min="0" max="60000" step="500" value="0"
+                    <input id="bitrateKbps" type="range" min="0" max="60000" step="500" value="0" data-manual-min="500"
                            oninput="bitrateText.textContent=(this.value==='0'?'Automático':(Number(this.value)/1000).toFixed(1)+' Mbps')"
-                           onchange="cmd('bitrateKbps',this.value)">
-                    <div class="rangeLimits">0 = automático · no 4K frontal é aplicado ao reiniciar o stream</div>
+                           onchange="applyBitrate(this)">
+                    <div class="rangeLimits" id="bitrateLimits">0 = automático</div>
 
                     <div class="muted" style="color:#F2B620;font-weight:bold;margin-top:16px;margin-bottom:6px">RECURSOS PRO EM TESTE</div>
                     <label><input id="watermarkEnabled" type="checkbox" onchange="cmd('watermark',this.checked?'1':'0')"> Marca d'água GOAT CAM FREE</label>
@@ -620,6 +620,18 @@ class MjpegServer(
                   setTimeout(loadState,650);
                 }
 
+                function applyBitrate(el){
+                  let v=Number(el.value||0);
+                  const manualMin=Number(el.dataset.manualMin||500);
+                  const manualMax=Number(el.max||60000);
+                  if(v>0){
+                    v=Math.max(manualMin,Math.min(manualMax,v));
+                    el.value=String(v);
+                    document.getElementById('bitrateText').textContent=(v/1000).toFixed(1)+' Mbps';
+                  }
+                  cmd('bitrateKbps',String(v));
+                }
+
                 async function cmd(action,value){
                   try{
                     const q='/camera/control?action='+encodeURIComponent(action)+(value===undefined?'':'&value='+encodeURIComponent(value));
@@ -657,9 +669,19 @@ class MjpegServer(
                     document.getElementById('fpsLimitText').textContent=
                       Number(s.targetFps||0)<=0?'Sem limite':Math.round(Number(s.targetFps))+' FPS';
                     const br=document.getElementById('bitrateKbps');
-                    br.value=Number(s.bitrateKbps||0);
+                    const brMin=Number(s.bitrateMinKbps||500);
+                    const brMax=Number(s.bitrateMaxKbps||60000);
+                    br.dataset.manualMin=String(brMin);
+                    br.max=String(brMax);
+                    let brValue=Number(s.bitrateKbps||0);
+                    if(brValue>0) brValue=Math.max(brMin,Math.min(brMax,brValue));
+                    br.value=brValue;
                     document.getElementById('bitrateText').textContent=
-                      Number(s.bitrateKbps||0)<=0?'Automático':(Number(s.bitrateKbps)/1000).toFixed(1)+' Mbps';
+                      brValue<=0?'Automático':(brValue/1000).toFixed(1)+' Mbps';
+                    document.getElementById('bitrateLimits').textContent=
+                      s.bitrateAppliesOnRestart
+                        ? 'Automático · 4K frontal manual: '+(brMin/1000).toFixed(0)+'–'+(brMax/1000).toFixed(0)+' Mbps · aplica ao parar/iniciar a transmissão'
+                        : 'Automático · manual: '+(brMin/1000).toFixed(1)+'–'+(brMax/1000).toFixed(1)+' Mbps';
                     document.getElementById('watermarkEnabled').checked=!!s.watermarkEnabled;
                     const saved=[];
                     if(s.preset1Saved)saved.push('Preset 1');

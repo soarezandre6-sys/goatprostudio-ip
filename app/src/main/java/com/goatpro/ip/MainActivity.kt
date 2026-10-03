@@ -2646,18 +2646,22 @@ class MainActivity : AppCompatActivity() {
 
             "bitrateKbps" -> {
                 val requested = value?.toIntOrNull() ?: return
-                streamBitrateBps = if (requested <= 0) {
-                    0
-                } else {
-                    requested.coerceIn(500, 60_000) * 1_000
+                val bitrateKbps = when {
+                    requested <= 0 -> 0
+                    selectedResolution.directFront4k -> requested.coerceIn(8_000, 18_000)
+                    else -> requested.coerceIn(500, 60_000)
                 }
-                h264Encoder.stop()
-                if (front4kDirectStreamer.isRunning()) {
-                    autoRestartStreamAfterCameraBind = true
-                    stopStreaming()
-                    startCamera()
+                streamBitrateBps = bitrateKbps * 1_000
+
+                // Build 45: changing the 4K frontal bitrate must not tear down
+                // MediaRecorder/camera while the live stream is running. The native
+                // Camera1 + MediaRecorder route has no safe public live bitrate API,
+                // so the new value is stored and applied on the next stream start.
+                if (!selectedResolution.directFront4k) {
+                    h264Encoder.stop()
                 }
                 updateStreamInfo()
+                saveSmartLinkState()
             }
 
             "watermark" -> {
@@ -3126,6 +3130,9 @@ class MainActivity : AppCompatActivity() {
                 ",\"targetFps\":$streamTargetFps" +
                 ",\"maxFps\":${maxSelectableFps()}" +
                 ",\"bitrateKbps\":${streamBitrateBps / 1000}" +
+                ",\"bitrateMinKbps\":${if (selectedResolution.directFront4k) 8_000 else 500}" +
+                ",\"bitrateMaxKbps\":${if (selectedResolution.directFront4k) 18_000 else 60_000}" +
+                ",\"bitrateAppliesOnRestart\":${selectedResolution.directFront4k}" +
                 ",\"watermarkEnabled\":$watermarkEnabled" +
                 ",\"smartLinkEnabled\":true" +
                 ",\"preset1Saved\":$preset1Saved" +

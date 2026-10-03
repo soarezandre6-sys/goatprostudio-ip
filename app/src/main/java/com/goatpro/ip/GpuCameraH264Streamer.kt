@@ -155,7 +155,12 @@ class GpuCameraH264Streamer(
     private var mjpegQuality = 50
 
     @Volatile
-    private var mjpegFps = 5
+    private var mjpegFps = 10
+
+    private val mjpegCaptureInFlight = AtomicBoolean(false)
+
+    @Volatile
+    private var mjpegLastCaptureStartedNs = 0L
 
     private var mjpegSize = Size(0, 0)
     private var mjpegOrientationDegrees = 0
@@ -163,11 +168,22 @@ class GpuCameraH264Streamer(
     private val mjpegCaptureRunnable = object : Runnable {
         override fun run() {
             if (!mjpegEnabled || stopping.get()) return
-            captureMjpegFrame()
-            workerHandler?.postDelayed(
-                this,
-                1000L / mjpegFps.coerceIn(1, MAX_GPU_MJPEG_FPS)
-            )
+            if (!mjpegCaptureInFlight.compareAndSet(false, true)) return
+
+            mjpegLastCaptureStartedNs = System.nanoTime()
+            if (!captureMjpegFrame()) {
+                mjpegCaptureInFlight.set(false)
+                scheduleNextMjpegCapture(80L)
+                return
+            }
+
+            // Safety watchdog. Normal pacing is driven by ImageReader completion;
+            // this only recovers a device that accepted capture() but never returned JPEG.
+            workerHandler?.postDelayed({
+                if (mjpegCaptureInFlight.compareAndSet(true, false)) {
+                    scheduleNextMjpegCapture(100L)
+                }
+            }, MJPEG_CAPTURE_TIMEOUT_MS)
         }
     }
 
@@ -235,9 +251,9 @@ class GpuCameraH264Streamer(
         return true
     }
 
-    fun setMjpegOutput(enabled: Boolean, quality: Int = 50, fps: Int = 5) {
+    fun setMjpegOutput(enabled: Boolean, quality: Int = 88, fps: Int = 10) {
         mjpegEnabled = enabled
-        mjpegQuality = quality.coerceIn(20, 90)
+        mjpegQuality = quality.coerceIn(MIN_GPU_MJPEG_QUALITY, MAX_GPU_MJPEG_QUALITY)
         mjpegFps = fps.coerceIn(1, MAX_GPU_MJPEG_FPS)
         workerHandler?.post { updateMjpegCaptureLoop() }
     }
@@ -663,6 +679,20 @@ class GpuCameraH264Streamer(
                     // MJPEG is a compatibility output. Never stop H.264 for it.
                 } finally {
                     runCatching { image.close() }
+                    mjpegCaptureInFlight.set(false)
+                    if (mjpegEnabled && !stopping.get()) {
+                        val targetIntervalMs =
+                            1000L / mjpegFps.coerceIn(1, MAX_GPU_MJPEG_FPS)
+                        val elapsedMs = if (mjpegLastCaptureStartedNs > 0L) {
+                            ((System.nanoTime() - mjpegLastCaptureStartedNs) / 1_000_000L)
+                                .coerceAtLeast(0L)
+                        } else {
+                            targetIntervalMs
+                        }
+                        scheduleNextMjpegCapture(
+                            (targetIntervalMs - elapsedMs).coerceAtLeast(0L)
+                        )
+                    }
                 }
             }
         }, handler)
@@ -719,6 +749,23 @@ class GpuCameraH264Streamer(
     private fun updateMjpegCaptureLoop() {
         val handler = workerHandler ?: return
         handler.removeCallbacks(mjpegCaptureRunnable)
+        if (!mjpegEnabled || stopping.get()) {
+            mjpegCaptureInFlight.set(false)
+            return
+        }
+        if (
+            captureSession != null &&
+            cameraDevice != null &&
+            mjpegReader != null &&
+            !mjpegCaptureInFlight.get()
+        ) {
+            handler.post(mjpegCaptureRunnable)
+        }
+    }
+
+    private fun scheduleNextMjpegCapture(delayMs: Long) {
+        val handler = workerHandler ?: return
+        handler.removeCallbacks(mjpegCaptureRunnable)
         if (
             mjpegEnabled &&
             !stopping.get() &&
@@ -726,11 +773,11 @@ class GpuCameraH264Streamer(
             cameraDevice != null &&
             mjpegReader != null
         ) {
-            handler.post(mjpegCaptureRunnable)
+            handler.postDelayed(mjpegCaptureRunnable, delayMs.coerceAtLeast(0L))
         }
     }
 
-    private fun captureMjpegFrame() {
+    private fun captureMjpegFrame(): Boolean {
         val session = captureSession ?: return
         val camera = cameraDevice ?: return
         val reader = mjpegReader ?: return
@@ -764,8 +811,10 @@ class GpuCameraH264Streamer(
                 }
             }
             session.capture(builder.build(), null, handler)
+            return true
         } catch (_: Exception) {
             // Keep H.264 alive even if this device refuses a video snapshot.
+            return false
         }
     }
 
@@ -980,6 +1029,8 @@ class GpuCameraH264Streamer(
         val wasActive = starting.getAndSet(false) || running.getAndSet(false)
         stopping.set(true)
         mjpegEnabled = false
+        mjpegCaptureInFlight.set(false)
+        mjpegLastCaptureStartedNs = 0L
         workerHandler?.removeCallbacks(mjpegCaptureRunnable)
 
         runCatching { captureSession?.stopRepeating() }
@@ -1148,7 +1199,10 @@ class GpuCameraH264Streamer(
             }
 
     companion object {
-        private const val MAX_GPU_MJPEG_FPS = 5
+        private const val MAX_GPU_MJPEG_FPS = 12
+        private const val MIN_GPU_MJPEG_QUALITY = 82
+        private const val MAX_GPU_MJPEG_QUALITY = 92
+        private const val MJPEG_CAPTURE_TIMEOUT_MS = 1_500L
 
         private const val VERTEX_SHADER = """
             attribute vec4 aPosition;

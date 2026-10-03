@@ -126,10 +126,13 @@ class GpuCameraH264Streamer(
         val codecConfig: Boolean
     )
 
-    private val deliveryQueue = ArrayBlockingQueue<EncodedUnit>(10)
+    private val deliveryQueue = ArrayBlockingQueue<EncodedUnit>(24)
 
     @Volatile
     private var droppedDeliveryFrames = 0L
+
+    @Volatile
+    private var lastPresentationNs = 0L
 
     private var codec: MediaCodec? = null
     private var encoderSurface: Surface? = null
@@ -173,6 +176,7 @@ class GpuCameraH264Streamer(
         stopping.set(false)
         firstEncodedFrame = false
         droppedDeliveryFrames = 0L
+        lastPresentationNs = 0L
         deliveryQueue.clear()
         config = request
 
@@ -259,11 +263,14 @@ class GpuCameraH264Streamer(
             probe.lensFacing
         )
         val totalRotation = normalizeDegrees(relativeRotation + request.extraRotationDegrees)
-        val portraitOutput = totalRotation == 90 || totalRotation == 270
-        outputWidth = if (portraitOutput) request.targetHeight else request.targetWidth
-        outputHeight = if (portraitOutput) request.targetWidth else request.targetHeight
 
-        setupEncoder(outputWidth, outputHeight, actualFps, request.targetBitrate)
+        // Keep the wire format exactly at the selected resolution. Rotation is
+        // done in texture coordinates, not by swapping the encoded dimensions.
+        outputWidth = request.targetWidth
+        outputHeight = request.targetHeight
+
+        val stableBitrate = request.targetBitrate.coerceAtMost(12_000_000)
+        setupEncoder(outputWidth, outputHeight, actualFps, stableBitrate)
         setupGl(probe.sourceSize, totalRotation)
         startDeliveryThread()
         startDrainThread()
@@ -599,10 +606,18 @@ class GpuCameraH264Streamer(
             GLES20.glDisableVertexAttribArray(positionHandle)
             GLES20.glDisableVertexAttribArray(texCoordHandle)
 
+            val rawTimestamp = texture.timestamp
+            val frameStepNs = 1_000_000_000L / actualFps.coerceAtLeast(1)
+            val presentationNs = when {
+                rawTimestamp <= 0L -> lastPresentationNs + frameStepNs
+                rawTimestamp <= lastPresentationNs -> lastPresentationNs + frameStepNs
+                else -> rawTimestamp
+            }
+            lastPresentationNs = presentationNs
             EGLExt.eglPresentationTimeANDROID(
                 eglDisplay,
                 eglSurface,
-                texture.timestamp
+                presentationNs
             )
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
                 throw IllegalStateException("eglSwapBuffers falhou.")

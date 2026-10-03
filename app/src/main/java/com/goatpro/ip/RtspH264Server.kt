@@ -43,7 +43,7 @@ class RtspH264Server(
         val sessionId: String
     ) {
         val writeLock = Any()
-        val sendQueue = ArrayBlockingQueue<PendingAccessUnit>(4)
+        val sendQueue = ArrayBlockingQueue<PendingAccessUnit>(24)
         val senderRunning = AtomicBoolean(false)
 
         @Volatile
@@ -109,7 +109,7 @@ class RtspH264Server(
                             break
                         }
                         socket.tcpNoDelay = true
-                        runCatching { socket.sendBufferSize = 512 * 1024 }
+                        runCatching { socket.sendBufferSize = 2 * 1024 * 1024 }
                         runCatching { socket.trafficClass = 0x10 }
                         Thread {
                             handleClient(socket)
@@ -208,11 +208,10 @@ class RtspH264Server(
                 client.sendQueue.offer(unit)
             }
 
-            // A socket that blocks repeatedly is worse than a reconnect. Closing
-            // it forces the Studio to reconnect instead of leaving a frozen 4K frame.
-            if (client.queueOverflows >= 3) {
-                removeClient(client)
-                return
+            // Do not tear down the Studio connection on a short 4K burst.
+            // Keep the session alive and resume from the next IDR/keyframe.
+            if (client.queueOverflows > 12) {
+                client.queueOverflows = 12
             }
         } else if (client.queueOverflows > 0) {
             client.queueOverflows--
@@ -482,7 +481,7 @@ class RtspH264Server(
     ) {
         if (nal.isEmpty()) return
 
-        val maxPayload = 1200
+        val maxPayload = 1400
         if (nal.size <= maxPayload) {
             val packet = makeRtpPacket(
                 client,

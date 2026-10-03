@@ -130,6 +130,9 @@ class Camera1GpuH264Streamer(
     @Volatile
     private var droppedDeliveryFrames = 0L
 
+    @Volatile
+    private var lastPresentationNs = 0L
+
     private data class EncodedUnit(
         val data: ByteArray,
         val ptsUs: Long,
@@ -137,7 +140,7 @@ class Camera1GpuH264Streamer(
         val codecConfig: Boolean
     )
 
-    private val deliveryQueue = ArrayBlockingQueue<EncodedUnit>(8)
+    private val deliveryQueue = ArrayBlockingQueue<EncodedUnit>(24)
 
     private val vertexBuffer: FloatBuffer = floatBufferOf(
         -1f, -1f,
@@ -166,6 +169,7 @@ class Camera1GpuH264Streamer(
         lastEncodedFrameNs = 0L
         lastDeliveryCompletedNs = 0L
         droppedDeliveryFrames = 0L
+        lastPresentationNs = 0L
         deliveryQueue.clear()
 
         val thread = HandlerThread("goat-camera1-gpu-h264").apply { start() }
@@ -263,7 +267,7 @@ class Camera1GpuH264Streamer(
         exactPreview4k = probe.exactPreview4k
         exactVideo4k = probe.exactVideo4k
         actualFps = minOf(config.targetFps.coerceIn(5, 60), probe.maxFps.coerceAtLeast(5))
-        actualBitrate = config.targetBitrate.coerceIn(8_000_000, 28_000_000)
+        actualBitrate = config.targetBitrate.coerceIn(8_000_000, 12_000_000)
 
         val info = Camera.CameraInfo()
         Camera.getCameraInfo(config.legacyCameraId, info)
@@ -273,9 +277,12 @@ class Camera1GpuH264Streamer(
             frontFacing = info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
         )
         val totalRotation = normalize(relativeRotation + config.extraRotationDegrees)
-        val portrait = totalRotation == 90 || totalRotation == 270
-        outputWidth = if (portrait) config.targetHeight else config.targetWidth
-        outputHeight = if (portrait) config.targetWidth else config.targetHeight
+
+        // Keep the encoded stream in the selected UHD geometry. Rotating the
+        // encoder itself to 2160x3840 caused decoder compatibility problems in
+        // desktop clients even though the phone preview remained fluid.
+        outputWidth = config.targetWidth
+        outputHeight = config.targetHeight
 
         setupEncoder(outputWidth, outputHeight, actualFps, actualBitrate)
         setupGl(selectedSource, totalRotation)
@@ -521,10 +528,18 @@ class Camera1GpuH264Streamer(
             GLES20.glDisableVertexAttribArray(positionHandle)
             GLES20.glDisableVertexAttribArray(texCoordHandle)
 
+            val rawTimestamp = texture.timestamp
+            val frameStepNs = 1_000_000_000L / actualFps.coerceAtLeast(1)
+            val presentationNs = when {
+                rawTimestamp <= 0L -> lastPresentationNs + frameStepNs
+                rawTimestamp <= lastPresentationNs -> lastPresentationNs + frameStepNs
+                else -> rawTimestamp
+            }
+            lastPresentationNs = presentationNs
             EGLExt.eglPresentationTimeANDROID(
                 eglDisplay,
                 eglSurface,
-                texture.timestamp
+                presentationNs
             )
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
                 throw IllegalStateException("eglSwapBuffers falhou.")

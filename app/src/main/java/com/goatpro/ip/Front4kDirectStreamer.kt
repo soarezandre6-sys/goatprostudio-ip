@@ -29,7 +29,7 @@ class Front4kDirectStreamer(
         val width: Int = 3840,
         val height: Int = 2160,
         val fps: Int = 30,
-        val bitrate: Int = 18_000_000,
+        val bitrate: Int = 12_000_000,
         val fromOfficialProfile: Boolean = false,
         val deviceRotationDegrees: Int = 0,
         val rotationOffsetDegrees: Int = 0,
@@ -77,7 +77,7 @@ class Front4kDirectStreamer(
     private var configuredWidth = 3840
     private var configuredHeight = 2160
     private var configuredFps = 30
-    private var configuredBitrate = 18_000_000
+    private var configuredBitrate = 12_000_000
 
     @Volatile
     private var firstFrameDelivered = false
@@ -107,7 +107,7 @@ class Front4kDirectStreamer(
             if (effective != null && effective.legacyCameraId >= 0) {
                 val direct = effective.copy(
                     fps = profile.fps.coerceIn(5, 60),
-                    bitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000),
+                    bitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000),
                     deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                     rotationOffsetDegrees = normalize(profile.rotationOffsetDegrees)
                 )
@@ -244,7 +244,7 @@ class Front4kDirectStreamer(
                 targetWidth = profile.width,
                 targetHeight = profile.height,
                 targetFps = profile.fps.coerceIn(5, 60),
-                targetBitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000),
+                targetBitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000),
                 deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                 extraRotationDegrees = normalize(profile.rotationOffsetDegrees)
             )
@@ -257,7 +257,7 @@ class Front4kDirectStreamer(
 
     private fun startLegacy(profile: Profile): Boolean {
         val safeFps = supportedLegacyFps(profile.legacyCameraId, profile.fps)
-        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000)
+        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000)
 
         return try {
             starting.set(true)
@@ -428,7 +428,7 @@ class Front4kDirectStreamer(
         gpuDelegate = local
 
         val safeBitrate = if (profile.bitrate > 0) {
-            profile.bitrate.coerceIn(8_000_000, 28_000_000)
+            profile.bitrate.coerceIn(8_000_000, 12_000_000)
         } else {
             H264Encoder.recommendedBitrate(3840, 2160, 30, 80)
         }

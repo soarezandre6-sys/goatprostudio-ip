@@ -778,11 +778,11 @@ class GpuCameraH264Streamer(
     }
 
     private fun captureMjpegFrame(): Boolean {
-        val session = captureSession ?: return
-        val camera = cameraDevice ?: return
-        val reader = mjpegReader ?: return
-        val request = config ?: return
-        val handler = workerHandler ?: return
+        val session = captureSession ?: return false
+        val camera = cameraDevice ?: return false
+        val reader = mjpegReader ?: return false
+        val request = config ?: return false
+        val handler = workerHandler ?: return false
 
         try {
             val builder = camera.createCaptureRequest(

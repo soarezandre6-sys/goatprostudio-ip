@@ -1,0 +1,50 @@
+name: Build 45 Validate H264 Bitrate
+
+on:
+  push:
+    branches:
+      - build-45-goat-cam
+    paths:
+      - 'tools/build45_bitrate_fix.py'
+      - '.github/build-45.trigger'
+      - '.github/workflows/build45-validate-bitrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-45-goat-cam
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Build 45 bitrate fix
+        run: python3 tools/build45_bitrate_fix.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Validate Kotlin compile only
+        run: gradle :app:compileDebugKotlin --stacktrace
+
+      - name: Commit validated Build 45 code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt app/src/main/java/com/goatpro/ip/MjpegServer.kt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Build 45: corrigir controle de bitrate H264"
+            git push origin HEAD:build-45-goat-cam
+          fi

@@ -5,6 +5,7 @@ on:
     branches: [ build-46-goat-cam ]
     paths:
       - 'tools/build46_camera_source_lock.py'
+      - '.github/build-46-camera-lock.trigger'
       - '.github/workflows/build46-camera-source-lock.yml'
 
 permissions:

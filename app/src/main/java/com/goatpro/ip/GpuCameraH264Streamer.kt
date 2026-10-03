@@ -645,14 +645,14 @@ class GpuCameraH264Streamer(
             // Build 41: ask Camera2 for the least smoothed image the public API exposes.
             val nrModes = characteristics.get(
                 CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES
-            ).orEmpty()
+            ) ?: intArrayOf()
             if (nrModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_OFF)) {
                 set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
             }
 
             val edgeModes = characteristics.get(
                 CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES
-            ).orEmpty()
+            ) ?: intArrayOf()
             when {
                 edgeModes.contains(CaptureRequest.EDGE_MODE_HIGH_QUALITY) ->
                     set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
@@ -662,7 +662,7 @@ class GpuCameraH264Streamer(
 
             val effectModes = characteristics.get(
                 CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS
-            ).orEmpty()
+            ) ?: intArrayOf()
             if (effectModes.contains(CaptureRequest.CONTROL_EFFECT_MODE_OFF)) {
                 set(CaptureRequest.CONTROL_EFFECT_MODE, CaptureRequest.CONTROL_EFFECT_MODE_OFF)
             }

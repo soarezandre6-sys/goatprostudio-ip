@@ -86,7 +86,7 @@ class RtspH264Server(
                             break
                         }
                         socket.tcpNoDelay = true
-                        runCatching { socket.sendBufferSize = 64 * 1024 }
+                        runCatching { socket.sendBufferSize = 512 * 1024 }
                         runCatching { socket.trafficClass = 0x10 }
                         Thread {
                             handleClient(socket)

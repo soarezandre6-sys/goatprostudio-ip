@@ -3257,21 +3257,27 @@ class MainActivity : AppCompatActivity() {
                     val cameraId =
                         selectedResolution.directCameraId
                             ?: option.logicalCameraId
+                    val front4kFps = (
+                        if (streamTargetFps > 0) streamTargetFps
+                        else DEFAULT_START_FPS
+                    ).coerceIn(5, 60)
+                    val front4kBitrate =
+                        if (streamBitrateBps > 0) {
+                            streamBitrateBps.coerceAtMost(28_000_000)
+                        } else {
+                            H264Encoder.recommendedBitrate(
+                                selectedResolution.size.width,
+                                selectedResolution.size.height,
+                                front4kFps,
+                                70
+                            )
+                        }
                     val profile = Front4kDirectStreamer.Profile(
                         cameraId = cameraId,
                         width = selectedResolution.size.width,
                         height = selectedResolution.size.height,
-                        fps = (
-                            if (streamTargetFps > 0) streamTargetFps
-                            else DEFAULT_START_FPS
-                        ).coerceIn(5, 60),
-                        bitrate =
-                            if (streamBitrateBps > 0) {
-                                streamBitrateBps
-                            } else {
-                                selectedResolution.directBitrate
-                                    ?: 32_000_000
-                            },
+                        fps = front4kFps,
+                        bitrate = front4kBitrate,
                         fromOfficialProfile =
                             Front4kDirectStreamer.profileFor(
                                 this,

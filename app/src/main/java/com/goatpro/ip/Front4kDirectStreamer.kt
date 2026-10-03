@@ -23,7 +23,7 @@ class Front4kDirectStreamer(
         val width: Int = 3840,
         val height: Int = 2160,
         val fps: Int = 30,
-        val bitrate: Int = 36_000_000,
+        val bitrate: Int = 18_000_000,
         val fromOfficialProfile: Boolean = false,
         val deviceRotationDegrees: Int = 0,
         val rotationOffsetDegrees: Int = 0
@@ -153,11 +153,11 @@ class Front4kDirectStreamer(
         delegate = local
 
         val safeBitrate = if (profile.bitrate > 0) {
-            profile.bitrate.coerceIn(12_000_000, 60_000_000)
+            profile.bitrate.coerceIn(8_000_000, 28_000_000)
         } else if (profile.fps > 30) {
-            48_000_000
+            24_000_000
         } else {
-            36_000_000
+            18_000_000
         }
 
         return local.start(
@@ -170,7 +170,9 @@ class Front4kDirectStreamer(
                 zoomRatio = 1f,
                 deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                 extraRotationDegrees = normalize(profile.rotationOffsetDegrees),
-                preferLargestSource = true,
+                // Prefer the public source closest to a video 16:9 stream instead
+                // of blindly selecting the largest 4:3 sensor output.
+                preferLargestSource = false,
                 // profileFor() already requires a high-resolution public source.
                 // At 60 FPS the GPU may deliberately choose a smaller 60-FPS source.
                 minimumSourcePixels = 0L
@@ -224,7 +226,7 @@ class Front4kDirectStreamer(
                 width = 3840,
                 height = 2160,
                 fps = maxFps,
-                bitrate = if (maxFps > 30) 48_000_000 else 36_000_000,
+                bitrate = if (maxFps > 30) 24_000_000 else 18_000_000,
                 fromOfficialProfile = official
             )
         }

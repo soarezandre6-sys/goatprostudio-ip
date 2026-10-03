@@ -30,7 +30,9 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
@@ -115,6 +117,19 @@ class GpuCameraH264Streamer(
     private var workerThread: HandlerThread? = null
     private var workerHandler: Handler? = null
     private var drainThread: Thread? = null
+    private var deliveryThread: Thread? = null
+
+    private data class EncodedUnit(
+        val data: ByteArray,
+        val presentationTimeUs: Long,
+        val keyFrame: Boolean,
+        val codecConfig: Boolean
+    )
+
+    private val deliveryQueue = ArrayBlockingQueue<EncodedUnit>(10)
+
+    @Volatile
+    private var droppedDeliveryFrames = 0L
 
     private var codec: MediaCodec? = null
     private var encoderSurface: Surface? = null
@@ -157,6 +172,8 @@ class GpuCameraH264Streamer(
         if (!starting.compareAndSet(false, true)) return false
         stopping.set(false)
         firstEncodedFrame = false
+        droppedDeliveryFrames = 0L
+        deliveryQueue.clear()
         config = request
 
         val thread = HandlerThread("goat-gpu-camera-h264").apply { start() }
@@ -248,6 +265,7 @@ class GpuCameraH264Streamer(
 
         setupEncoder(outputWidth, outputHeight, actualFps, request.targetBitrate)
         setupGl(probe.sourceSize, totalRotation)
+        startDeliveryThread()
         startDrainThread()
         openCamera(manager, request, characteristics)
     }
@@ -611,7 +629,7 @@ class GpuCameraH264Streamer(
                                 format.getByteBuffer(key)?.let(::bufferBytes)
                                     ?.takeIf { it.isNotEmpty() }
                                     ?.let {
-                                        listener.onAccessUnit(
+                                        enqueueAccessUnit(
                                             it,
                                             0L,
                                             false,
@@ -643,7 +661,7 @@ class GpuCameraH264Streamer(
                                     )
                                 }
 
-                                listener.onAccessUnit(
+                                enqueueAccessUnit(
                                     bytes,
                                     info.presentationTimeUs,
                                     (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
@@ -661,6 +679,60 @@ class GpuCameraH264Streamer(
             name = "goat-gpu-h264-drain"
             isDaemon = true
             start()
+        }
+    }
+
+    private fun startDeliveryThread() {
+        deliveryThread = Thread {
+            while (
+                !stopping.get() &&
+                (starting.get() || running.get() || deliveryQueue.isNotEmpty())
+            ) {
+                val unit = try {
+                    deliveryQueue.poll(100, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    null
+                } ?: continue
+
+                try {
+                    listener.onAccessUnit(
+                        unit.data,
+                        unit.presentationTimeUs,
+                        unit.keyFrame,
+                        unit.codecConfig
+                    )
+                } catch (_: Exception) {
+                    // Network/client delivery must never stall the encoder drain.
+                }
+            }
+        }.apply {
+            name = "goat-gpu-h264-delivery"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun enqueueAccessUnit(
+        data: ByteArray,
+        presentationTimeUs: Long,
+        keyFrame: Boolean,
+        codecConfig: Boolean
+    ) {
+        val unit = EncodedUnit(
+            data = data,
+            presentationTimeUs = presentationTimeUs,
+            keyFrame = keyFrame,
+            codecConfig = codecConfig
+        )
+
+        if (deliveryQueue.offer(unit)) return
+
+        // Keep latency bounded. If the RTSP consumer/network is slower than the
+        // encoder, discard an old frame instead of blocking MediaCodec/GPU.
+        deliveryQueue.poll()
+        if (deliveryQueue.offer(unit)) {
+            droppedDeliveryFrames++
+            requestKeyFrame()
         }
     }
 
@@ -727,6 +799,9 @@ class GpuCameraH264Streamer(
         runCatching { encoderSurface?.release() }
         encoderSurface = null
 
+        runCatching { deliveryThread?.interrupt() }
+        deliveryThread = null
+        deliveryQueue.clear()
         runCatching { workerThread?.quitSafely() }
         workerHandler = null
         workerThread = null
@@ -956,7 +1031,9 @@ class GpuCameraH264Streamer(
                 val durationFps = if (duration > 0L) {
                     (1_000_000_000L / duration).toInt().coerceAtLeast(1)
                 } else {
-                    120
+                    // Zero means the HAL did not provide a useful timing value.
+                    // Never interpret that as 120 FPS for a high-resolution stream.
+                    30
                 }
                 val aeMax = chars.get(
                     CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES

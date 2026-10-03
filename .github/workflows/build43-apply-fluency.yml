@@ -1,0 +1,38 @@
+name: Build 43 Apply Front 4K Fluency
+
+on:
+  push:
+    branches: [ build-43-goat-cam ]
+    paths:
+      - ".github/build-43.trigger"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-43-goat-cam
+          fetch-depth: 0
+      - name: Apply Build 43 patch
+        run: python tools/build43_front4k_fluency_quality.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Validate Kotlin compile only
+        run: gradle :app:compileDebugKotlin --stacktrace
+      - name: Commit validated Build 43 code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt app/src/main/java/com/goatpro/ip/MainActivity.kt BUILD_43_STATUS.md
+          git commit -m "Build 43: melhorar fluidez e detalhe do 4K frontal" || true
+          git push origin HEAD:build-43-goat-cam

@@ -3532,8 +3532,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         addressText.text = if (lines.isNotEmpty()) {
-            lines.joinToString("
-")
+            lines.joinToString("\n")
         } else {
             "Sem endereço Wi-Fi disponível"
         }
@@ -3598,8 +3597,7 @@ class MainActivity : AppCompatActivity() {
             lines += "IPv6 MJPEG: http://$host:8080/video"
             lines += "IPv6 RTSP: rtsp://$host:8554/h264"
         }
-        val urls = lines.joinToString("
-")
+        val urls = lines.joinToString("\n")
 
         val clipboard =
             getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

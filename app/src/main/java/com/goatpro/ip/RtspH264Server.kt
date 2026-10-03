@@ -441,25 +441,21 @@ class RtspH264Server(
     }
 
     private fun buildSdp(localIp: String): String {
-        val address = NetworkUtils.sdpAddress(localIp)
-        val family = if (address.contains(':')) "IP6" else "IP4"
-        return "v=0
-" +
-            "o=- 0 0 IN $family $address
-" +
-            "s=GOAT PRO IP H264
-" +
-            "c=IN $family $address
-" +
-            "t=0 0\r\n" +
-            "a=control:*\r\n" +
-            "m=video 0 RTP/AVP 96\r\n" +
-            "a=rtpmap:96 H264/90000\r\n" +
-            "a=fmtp:96 packetization-mode=1\r\n" +
-            "a=control:trackID=0\r\n"
-    }
+    val address = NetworkUtils.sdpAddress(localIp)
+    val family = if (address.contains(':')) "IP6" else "IP4"
+    return "v=0\r\n" +
+        "o=- 0 0 IN $family $address\r\n" +
+        "s=GOAT PRO IP H264\r\n" +
+        "c=IN $family $address\r\n" +
+        "t=0 0\r\n" +
+        "a=control:*\r\n" +
+        "m=video 0 RTP/AVP 96\r\n" +
+        "a=rtpmap:96 H264/90000\r\n" +
+        "a=fmtp:96 packetization-mode=1\r\n" +
+        "a=control:trackID=0\r\n"
+}
 
-    private fun respond(
+private fun respond(
         client: ClientSession,
         cseq: String,
         status: String = "200 OK",

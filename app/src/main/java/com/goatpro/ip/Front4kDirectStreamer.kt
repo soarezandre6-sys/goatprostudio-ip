@@ -498,9 +498,9 @@ class Front4kDirectStreamer(
         local.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
 
         val safeBitrate = if (profile.bitrate > 0) {
-            profile.bitrate.coerceIn(8_000_000, 12_000_000)
+            profile.bitrate.coerceIn(18_000_000, 28_000_000)
         } else {
-            H264Encoder.recommendedBitrate(3840, 2160, 30, 80)
+            24_000_000
         }
 
         return local.start(

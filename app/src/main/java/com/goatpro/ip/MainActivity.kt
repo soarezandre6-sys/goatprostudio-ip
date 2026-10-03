@@ -175,11 +175,12 @@ class MainActivity : AppCompatActivity() {
         MjpegServer(8080, object : MjpegServer.Listener {
             override fun onVideoClientCountChanged(count: Int) {
                 if (selectedResolution.directFront4k) {
+                    // Build 41: direct UHD is RTSP/H.264 only. Keep HTTP alive for
+                    // state/control, but never start the concurrent 4K JPEG path.
                     front4kDirectStreamer.setMjpegOutput(
-                        enabled = count > 0,
+                        enabled = false,
                         quality = streamJpegQuality,
-                        fps = (if (streamTargetFps > 0) streamTargetFps else 15)
-                            .coerceIn(5, 15)
+                        fps = 1
                     )
                 }
                 runOnUiThread { updateConnectionStatus(count) }
@@ -405,7 +406,7 @@ class MainActivity : AppCompatActivity() {
                         actualStreamWidth = width
                         actualStreamHeight = height
                         statusText.text =
-                            "TRANSMITINDO 4K FRONTAL PARA O GOAT PRO STUDIO"
+                            "TRANSMITINDO 4K FRONTAL · RTSP/H.264 DIRETO"
                         statusText.setTextColor(
                             ContextCompat.getColor(
                                 this@MainActivity,

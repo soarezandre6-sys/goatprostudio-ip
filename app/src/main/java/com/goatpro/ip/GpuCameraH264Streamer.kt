@@ -323,9 +323,15 @@ class GpuCameraH264Streamer(
         outputWidth = request.targetWidth
         outputHeight = request.targetHeight
         mjpegOrientationDegrees = totalRotation
-        setupMjpegReader(characteristics, outputWidth, outputHeight)
 
-        val stableBitrate = request.targetBitrate.coerceAtMost(12_000_000)
+        // Build 41: direct UHD is RTSP/H.264 only. A concurrent JPEG ImageReader on
+        // the Samsung front camera was adding ISP/JPEG load and hurting cadence/detail.
+        val directUhdH264Only = outputWidth >= 3840 && outputHeight >= 2160
+        if (!directUhdH264Only) {
+            setupMjpegReader(characteristics, outputWidth, outputHeight)
+        }
+
+        val stableBitrate = request.targetBitrate.coerceAtMost(28_000_000)
         setupEncoder(outputWidth, outputHeight, actualFps, stableBitrate)
         setupGl(probe.sourceSize, totalRotation)
         startDeliveryThread()
@@ -634,6 +640,31 @@ class GpuCameraH264Streamer(
                         request.zoomRatio.coerceIn(range.lower, range.upper)
                     )
                 }
+            }
+
+            // Build 41: ask Camera2 for the least smoothed image the public API exposes.
+            val nrModes = characteristics.get(
+                CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES
+            ).orEmpty()
+            if (nrModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_OFF)) {
+                set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
+            }
+
+            val edgeModes = characteristics.get(
+                CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES
+            ).orEmpty()
+            when {
+                edgeModes.contains(CaptureRequest.EDGE_MODE_HIGH_QUALITY) ->
+                    set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+                edgeModes.contains(CaptureRequest.EDGE_MODE_FAST) ->
+                    set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+            }
+
+            val effectModes = characteristics.get(
+                CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS
+            ).orEmpty()
+            if (effectModes.contains(CaptureRequest.CONTROL_EFFECT_MODE_OFF)) {
+                set(CaptureRequest.CONTROL_EFFECT_MODE, CaptureRequest.CONTROL_EFFECT_MODE_OFF)
             }
         }
         session.setRepeatingRequest(builder.build(), null, handler)

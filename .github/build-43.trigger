@@ -1,1 +1,1 @@
-trigger build 43 front 4k fluency 2026-10-03
+trigger build 43 apk 2026-10-03

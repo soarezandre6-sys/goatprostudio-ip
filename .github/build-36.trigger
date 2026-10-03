@@ -1,0 +1,1 @@
+apply build 36 front 4k native route and frame diagnostics

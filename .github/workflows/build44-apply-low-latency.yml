@@ -1,0 +1,48 @@
+name: Build 44 Apply Low Latency
+
+on:
+  push:
+    branches:
+      - build-44-goat-cam
+    paths:
+      - 'tools/build44_low_latency_patch.py'
+      - '.github/build-44.trigger'
+      - '.github/workflows/build44-apply-low-latency.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-44-goat-cam
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Build 44 patch
+        run: python3 tools/build44_low_latency_patch.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate Kotlin compile only
+        run: ./gradlew :app:compileDebugKotlin --no-daemon
+
+      - name: Commit validated Build 44 code
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/RtspH264Server.kt app/src/main/java/com/goatpro/ip/MainActivity.kt app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Build 44: reduzir latencia do 4K frontal"
+            git push origin HEAD:build-44-goat-cam
+          fi

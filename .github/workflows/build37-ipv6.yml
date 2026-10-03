@@ -17,7 +17,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Build 37 IPv6 patch
-        run: python3 tools/build37_ipv6_patch.py
+        run: |
+          python3 tools/build37_fix_patch_script.py
+          python3 tools/build37_ipv6_patch.py
 
       - name: Commit Build 37 code
         run: |

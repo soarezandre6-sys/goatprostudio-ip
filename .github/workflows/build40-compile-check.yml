@@ -1,0 +1,39 @@
+name: Build 40 Compile Check
+
+on:
+  push:
+    branches: [ build-40-goat-cam ]
+    paths:
+      - ".github/build-40-compile.trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-40-goat-cam
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply Build 40 patch
+        run: python3 tools/build40_dual_preview_patch.py
+      - name: Commit Build 40 source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/goatpro/ip/GpuCameraH264Streamer.kt app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt app/src/main/java/com/goatpro/ip/MainActivity.kt app/src/main/res/layout/activity_main.xml
+          if ! git diff --cached --quiet; then
+            git commit -m "Build 40: preview local GPU e H264 4K com mais detalhe"
+            git push origin HEAD:build-40-goat-cam
+          fi
+      - name: Compile Kotlin
+        run: gradle :app:compileDebugKotlin --stacktrace

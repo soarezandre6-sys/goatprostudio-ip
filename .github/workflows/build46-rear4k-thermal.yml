@@ -1,0 +1,49 @@
+name: Build 46 Validate Rear 4K Thermal Fast Path
+
+on:
+  push:
+    branches: [ build-46-goat-cam ]
+    paths:
+      - 'tools/build46_rear4k_thermal_fastpath.py'
+      - '.github/workflows/build46-rear4k-thermal.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build-46-goat-cam
+          fetch-depth: 0
+
+      - name: Apply Build 46 rear 4K thermal fast path
+        run: python3 tools/build46_rear4k_thermal_fastpath.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Validate Kotlin compile only
+        run: gradle :app:compileDebugKotlin --no-daemon
+
+      - name: Commit validated Build 46 thermal code
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/goatpro/ip/MainActivity.kt \
+                  app/src/main/java/com/goatpro/ip/H264Encoder.kt \
+                  app/src/main/java/com/goatpro/ip/WatermarkOverlay.kt
+          if git diff --cached --quiet; then
+            echo 'No code changes to commit'
+          else
+            git commit -m 'Build 46: aliviar aquecimento no 4K traseiro'
+            git push origin HEAD:build-46-goat-cam
+          fi

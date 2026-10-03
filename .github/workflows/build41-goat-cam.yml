@@ -30,6 +30,7 @@ jobs:
           else
             python tools/build41_rtsp_quality_patch.py
           fi
+          python tools/build41_compile_fix.py
 
       - name: Commit Build 41 source
         run: |
@@ -37,7 +38,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/goatpro/ip/GpuCameraH264Streamer.kt app/src/main/java/com/goatpro/ip/Front4kDirectStreamer.kt app/src/main/java/com/goatpro/ip/MainActivity.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Build 41: RTSP 4K direto, mais detalhe e menos carga"
+            git commit -m "Build 41: corrigir compatibilidade Kotlin do ajuste de imagem"
             git push origin HEAD:build-41-goat-cam
           fi
 

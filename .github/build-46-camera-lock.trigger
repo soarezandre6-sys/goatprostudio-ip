@@ -1,0 +1,1 @@
+validate-camera-source-lock

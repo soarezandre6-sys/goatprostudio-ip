@@ -7,6 +7,7 @@ import android.media.CamcorderProfile
 import android.media.MediaRecorder
 import android.os.ParcelFileDescriptor
 import android.os.Build
+import android.view.Surface
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -76,6 +77,15 @@ class Front4kDirectStreamer(
     @Volatile
     private var mjpegFps = 10
 
+    @Volatile
+    private var localPreviewSurface: Surface? = null
+
+    @Volatile
+    private var localPreviewWidth = 0
+
+    @Volatile
+    private var localPreviewHeight = 0
+
     private var camera: Camera? = null
     private var previewTexture: SurfaceTexture? = null
     private var recorder: MediaRecorder? = null
@@ -116,6 +126,17 @@ class Front4kDirectStreamer(
         gpuDelegate?.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
     }
 
+    fun setLocalPreviewSurface(surface: Surface?, width: Int = 0, height: Int = 0) {
+        localPreviewSurface = surface
+        localPreviewWidth = width.coerceAtLeast(0)
+        localPreviewHeight = height.coerceAtLeast(0)
+        gpuDelegate?.setLocalPreviewSurface(
+            surface,
+            localPreviewWidth,
+            localPreviewHeight
+        )
+    }
+
     fun start(profile: Profile): Boolean {
         synchronized(lock) {
             if (isRunning() || isStarting()) return true
@@ -125,7 +146,7 @@ class Front4kDirectStreamer(
             if (effective != null && effective.legacyCameraId >= 0) {
                 val direct = effective.copy(
                     fps = profile.fps.coerceIn(5, 60),
-                    bitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000),
+                    bitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000),
                     deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                     rotationOffsetDegrees = normalize(profile.rotationOffsetDegrees)
                 )
@@ -309,7 +330,7 @@ class Front4kDirectStreamer(
                 targetWidth = profile.width,
                 targetHeight = profile.height,
                 targetFps = profile.fps.coerceIn(5, 60),
-                targetBitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000),
+                targetBitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000),
                 deviceRotationDegrees = normalize(profile.deviceRotationDegrees),
                 extraRotationDegrees = normalize(profile.rotationOffsetDegrees)
             )
@@ -322,7 +343,7 @@ class Front4kDirectStreamer(
 
     private fun startLegacy(profile: Profile): Boolean {
         val safeFps = supportedLegacyFps(profile.legacyCameraId, profile.fps)
-        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 12_000_000)
+        val safeBitrate = profile.bitrate.coerceIn(8_000_000, 28_000_000)
 
         return try {
             starting.set(true)
@@ -385,6 +406,7 @@ class Front4kDirectStreamer(
                 setVideoSize(3840, 2160)
                 setVideoFrameRate(safeFps)
                 setVideoEncodingBitRate(safeBitrate)
+                localPreviewSurface?.takeIf { it.isValid }?.let { setPreviewDisplay(it) }
                 setOrientationHint(
                     recorderOrientationHint(
                         profile.legacyCameraId,
@@ -496,9 +518,14 @@ class Front4kDirectStreamer(
         )
         gpuDelegate = local
         local.setMjpegOutput(mjpegEnabled, mjpegQuality, mjpegFps)
+        local.setLocalPreviewSurface(
+            localPreviewSurface,
+            localPreviewWidth,
+            localPreviewHeight
+        )
 
         val safeBitrate = if (profile.bitrate > 0) {
-            profile.bitrate.coerceIn(8_000_000, 12_000_000)
+            profile.bitrate.coerceIn(8_000_000, 28_000_000)
         } else {
             H264Encoder.recommendedBitrate(3840, 2160, 30, 80)
         }

@@ -144,6 +144,18 @@ class GpuCameraH264Streamer(
     private var cameraSurface: Surface? = null
     private var cameraTexture: SurfaceTexture? = null
 
+    @Volatile
+    private var localPreviewSurface: Surface? = null
+
+    @Volatile
+    private var localPreviewWidth = 0
+
+    @Volatile
+    private var localPreviewHeight = 0
+
+    @Volatile
+    private var lastLocalPreviewNs = 0L
+
     private var mjpegReader: ImageReader? = null
     private var mjpegThread: HandlerThread? = null
     private var mjpegHandler: Handler? = null
@@ -190,6 +202,8 @@ class GpuCameraH264Streamer(
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var eglPreviewSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var eglConfig: EGLConfig? = null
     private var glProgram = 0
     private var oesTextureId = 0
     private var positionHandle = -1
@@ -256,6 +270,13 @@ class GpuCameraH264Streamer(
         mjpegQuality = quality.coerceIn(MIN_GPU_MJPEG_QUALITY, MAX_GPU_MJPEG_QUALITY)
         mjpegFps = fps.coerceIn(1, MAX_GPU_MJPEG_FPS)
         workerHandler?.post { updateMjpegCaptureLoop() }
+    }
+
+    fun setLocalPreviewSurface(surface: Surface?, width: Int = 0, height: Int = 0) {
+        localPreviewSurface = surface
+        localPreviewWidth = width.coerceAtLeast(0)
+        localPreviewHeight = height.coerceAtLeast(0)
+        workerHandler?.post { rebuildLocalPreviewEglSurface() }
     }
 
     fun requestKeyFrame() {
@@ -325,7 +346,7 @@ class GpuCameraH264Streamer(
         mjpegOrientationDegrees = totalRotation
         setupMjpegReader(characteristics, outputWidth, outputHeight)
 
-        val stableBitrate = request.targetBitrate.coerceAtMost(12_000_000)
+        val stableBitrate = request.targetBitrate.coerceIn(8_000_000, 28_000_000)
         setupEncoder(outputWidth, outputHeight, actualFps, stableBitrate)
         setupGl(probe.sourceSize, totalRotation)
         startDeliveryThread()
@@ -449,6 +470,7 @@ class GpuCameraH264Streamer(
         eglDisplay = display
         eglContext = glContext
         eglSurface = windowSurface
+        this.eglConfig = eglConfig
 
         val textureIds = IntArray(1)
         GLES20.glGenTextures(1, textureIds, 0)
@@ -495,6 +517,7 @@ class GpuCameraH264Streamer(
         texture.setOnFrameAvailableListener({ renderFrame() }, handler)
         cameraTexture = texture
         cameraSurface = Surface(texture)
+        rebuildLocalPreviewEglSurface()
     }
 
     private fun openCamera(
@@ -818,6 +841,96 @@ class GpuCameraH264Streamer(
         }
     }
 
+    private fun rebuildLocalPreviewEglSurface() {
+        destroyLocalPreviewEglSurface()
+        val display = eglDisplay
+        val config = eglConfig
+        val surface = localPreviewSurface
+        if (
+            display == EGL14.EGL_NO_DISPLAY ||
+            config == null ||
+            surface == null ||
+            !surface.isValid
+        ) return
+
+        val created = runCatching {
+            EGL14.eglCreateWindowSurface(
+                display,
+                config,
+                surface,
+                intArrayOf(EGL14.EGL_NONE),
+                0
+            )
+        }.getOrNull() ?: EGL14.EGL_NO_SURFACE
+        if (created != EGL14.EGL_NO_SURFACE) {
+            eglPreviewSurface = created
+            lastLocalPreviewNs = 0L
+        }
+    }
+
+    private fun destroyLocalPreviewEglSurface() {
+        val preview = eglPreviewSurface
+        eglPreviewSurface = EGL14.EGL_NO_SURFACE
+        if (preview == EGL14.EGL_NO_SURFACE || eglDisplay == EGL14.EGL_NO_DISPLAY) return
+        if (
+            eglSurface != EGL14.EGL_NO_SURFACE &&
+            eglContext != EGL14.EGL_NO_CONTEXT
+        ) {
+            runCatching {
+                EGL14.eglMakeCurrent(
+                    eglDisplay,
+                    eglSurface,
+                    eglSurface,
+                    eglContext
+                )
+            }
+        }
+        runCatching { EGL14.eglDestroySurface(eglDisplay, preview) }
+    }
+
+    private fun drawCurrentTexture(width: Int, height: Int) {
+        GLES20.glViewport(0, 0, width.coerceAtLeast(1), height.coerceAtLeast(1))
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glUseProgram(glProgram)
+
+        vertexBuffer.position(0)
+        GLES20.glEnableVertexAttribArray(positionHandle)
+        GLES20.glVertexAttribPointer(
+            positionHandle,
+            2,
+            GLES20.GL_FLOAT,
+            false,
+            0,
+            vertexBuffer
+        )
+
+        textureBuffer.position(0)
+        GLES20.glEnableVertexAttribArray(texCoordHandle)
+        GLES20.glVertexAttribPointer(
+            texCoordHandle,
+            2,
+            GLES20.GL_FLOAT,
+            false,
+            0,
+            textureBuffer
+        )
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
+        GLES20.glUniformMatrix4fv(
+            texMatrixHandle,
+            1,
+            false,
+            textureTransform,
+            0
+        )
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisableVertexAttribArray(texCoordHandle)
+    }
+
     private fun renderFrame() {
         if (stopping.get()) return
         val texture = cameraTexture ?: return
@@ -827,47 +940,6 @@ class GpuCameraH264Streamer(
             texture.updateTexImage()
             texture.getTransformMatrix(textureTransform)
 
-            GLES20.glViewport(0, 0, outputWidth, outputHeight)
-            GLES20.glClearColor(0f, 0f, 0f, 1f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            GLES20.glUseProgram(glProgram)
-
-            vertexBuffer.position(0)
-            GLES20.glEnableVertexAttribArray(positionHandle)
-            GLES20.glVertexAttribPointer(
-                positionHandle,
-                2,
-                GLES20.GL_FLOAT,
-                false,
-                0,
-                vertexBuffer
-            )
-
-            textureBuffer.position(0)
-            GLES20.glEnableVertexAttribArray(texCoordHandle)
-            GLES20.glVertexAttribPointer(
-                texCoordHandle,
-                2,
-                GLES20.GL_FLOAT,
-                false,
-                0,
-                textureBuffer
-            )
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
-            GLES20.glUniformMatrix4fv(
-                texMatrixHandle,
-                1,
-                false,
-                textureTransform,
-                0
-            )
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            GLES20.glDisableVertexAttribArray(positionHandle)
-            GLES20.glDisableVertexAttribArray(texCoordHandle)
-
             val rawTimestamp = texture.timestamp
             val frameStepNs = 1_000_000_000L / actualFps.coerceAtLeast(1)
             val presentationNs = when {
@@ -876,13 +948,40 @@ class GpuCameraH264Streamer(
                 else -> rawTimestamp
             }
             lastPresentationNs = presentationNs
+
+            if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+                throw IllegalStateException("Falha ao ativar EGLSurface do encoder.")
+            }
+            drawCurrentTexture(outputWidth, outputHeight)
             EGLExt.eglPresentationTimeANDROID(
                 eglDisplay,
                 eglSurface,
                 presentationNs
             )
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
-                throw IllegalStateException("eglSwapBuffers falhou.")
+                throw IllegalStateException("eglSwapBuffers do encoder falhou.")
+            }
+
+            // Local Live View is a secondary consumer of the SAME OES camera texture.
+            // Limit it to 15 FPS so the phone display can never back-pressure 4K H.264.
+            val preview = eglPreviewSurface
+            if (
+                preview != EGL14.EGL_NO_SURFACE &&
+                presentationNs - lastLocalPreviewNs >= LOCAL_PREVIEW_INTERVAL_NS
+            ) {
+                try {
+                    if (EGL14.eglMakeCurrent(eglDisplay, preview, preview, eglContext)) {
+                        val w = localPreviewWidth.takeIf { it > 0 } ?: outputWidth
+                        val h = localPreviewHeight.takeIf { it > 0 } ?: outputHeight
+                        drawCurrentTexture(w, h)
+                        if (EGL14.eglSwapBuffers(eglDisplay, preview)) {
+                            lastLocalPreviewNs = presentationNs
+                        }
+                    }
+                } catch (_: Exception) {
+                    // The phone UI preview is optional. Never stop network H.264 for it.
+                    destroyLocalPreviewEglSurface()
+                }
             }
         } catch (ex: Exception) {
             fail(
@@ -1045,6 +1144,12 @@ class GpuCameraH264Streamer(
         runCatching { cameraTexture?.release() }
         cameraTexture = null
 
+        destroyLocalPreviewEglSurface()
+        localPreviewSurface = null
+        localPreviewWidth = 0
+        localPreviewHeight = 0
+        lastLocalPreviewNs = 0L
+
         runCatching { mjpegReader?.setOnImageAvailableListener(null, null) }
         runCatching { mjpegReader?.close() }
         mjpegReader = null
@@ -1077,6 +1182,8 @@ class GpuCameraH264Streamer(
         eglDisplay = EGL14.EGL_NO_DISPLAY
         eglContext = EGL14.EGL_NO_CONTEXT
         eglSurface = EGL14.EGL_NO_SURFACE
+        eglPreviewSurface = EGL14.EGL_NO_SURFACE
+        eglConfig = null
         glProgram = 0
         oesTextureId = 0
 
@@ -1203,6 +1310,7 @@ class GpuCameraH264Streamer(
         private const val MIN_GPU_MJPEG_QUALITY = 82
         private const val MAX_GPU_MJPEG_QUALITY = 92
         private const val MJPEG_CAPTURE_TIMEOUT_MS = 1_500L
+        private const val LOCAL_PREVIEW_INTERVAL_NS = 66_666_667L
 
         private const val VERTEX_SHADER = """
             attribute vec4 aPosition;

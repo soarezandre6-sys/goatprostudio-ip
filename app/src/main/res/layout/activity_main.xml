@@ -94,6 +94,13 @@
                 android:background="#000000"
                 app:implementationMode="performance"
                 app:scaleType="fitCenter" />
+
+            <TextureView
+                android:id="@+id/directPreviewTexture"
+                android:layout_width="match_parent"
+                android:layout_height="250dp"
+                android:background="#000000"
+                android:visibility="gone" />
         </FrameLayout>
 
         <LinearLayout

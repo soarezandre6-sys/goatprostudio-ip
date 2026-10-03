@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
@@ -16,6 +17,7 @@ import android.os.Bundle
 import android.util.Size
 import android.view.OrientationEventListener
 import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -49,6 +51,8 @@ import java.util.concurrent.TimeUnit
 @OptIn(ExperimentalCamera2Interop::class)
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
+    private lateinit var directPreviewTexture: TextureView
+    private var directPreviewSurface: Surface? = null
     private lateinit var statusText: TextView
     private lateinit var connectionStatusText: TextView
     private lateinit var addressText: TextView
@@ -429,6 +433,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onError(message: String) {
                     runOnUiThread {
                         front4kDirectStreamer.stop()
+                        setDirectPreviewVisible(false)
                         rtspServer.stop()
                         server.stop()
                         audioCapture.stop()
@@ -558,6 +563,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         previewView = findViewById(R.id.previewView)
+        directPreviewTexture = findViewById(R.id.directPreviewTexture)
         statusText = findViewById(R.id.statusText)
         connectionStatusText = findViewById(R.id.connectionStatusText)
         addressText = findViewById(R.id.addressText)
@@ -576,6 +582,7 @@ class MainActivity : AppCompatActivity() {
         autoDiscoverySwitch = findViewById(R.id.autoDiscoverySwitch)
         backgroundStreamingSwitch = findViewById(R.id.backgroundStreamingSwitch)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        setupDirectPreviewSurface()
         setupOrientationTracking()
         restoreSmartLinkState()
         StreamingCameraLifecycle.setActive(true)
@@ -858,6 +865,88 @@ class MainActivity : AppCompatActivity() {
                 "Não foi possível abrir o site neste aparelho.",
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+
+    private fun setupDirectPreviewSurface() {
+        directPreviewTexture.surfaceTextureListener =
+            object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(
+                    surfaceTexture: SurfaceTexture,
+                    width: Int,
+                    height: Int
+                ) {
+                    directPreviewSurface?.release()
+                    directPreviewSurface = Surface(surfaceTexture)
+                    if (
+                        selectedResolution.directFront4k &&
+                        (front4kDirectStreamer.isRunning() ||
+                            front4kDirectStreamer.isStarting())
+                    ) {
+                        front4kDirectStreamer.setLocalPreviewSurface(
+                            directPreviewSurface,
+                            width,
+                            height
+                        )
+                    }
+                }
+
+                override fun onSurfaceTextureSizeChanged(
+                    surfaceTexture: SurfaceTexture,
+                    width: Int,
+                    height: Int
+                ) {
+                    if (
+                        selectedResolution.directFront4k &&
+                        (front4kDirectStreamer.isRunning() ||
+                            front4kDirectStreamer.isStarting())
+                    ) {
+                        front4kDirectStreamer.setLocalPreviewSurface(
+                            directPreviewSurface,
+                            width,
+                            height
+                        )
+                    }
+                }
+
+                override fun onSurfaceTextureDestroyed(
+                    surfaceTexture: SurfaceTexture
+                ): Boolean {
+                    front4kDirectStreamer.setLocalPreviewSurface(null, 0, 0)
+                    directPreviewSurface?.release()
+                    directPreviewSurface = null
+                    return true
+                }
+
+                override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
+            }
+    }
+
+    private fun setDirectPreviewVisible(visible: Boolean) {
+        if (!::directPreviewTexture.isInitialized || !::previewView.isInitialized) return
+        if (visible) {
+            previewView.visibility = View.INVISIBLE
+            directPreviewTexture.visibility = View.VISIBLE
+
+            if (directPreviewSurface == null && directPreviewTexture.isAvailable) {
+                directPreviewTexture.surfaceTexture?.let { texture ->
+                    directPreviewSurface = Surface(texture)
+                }
+            }
+            directPreviewSurface?.takeIf { it.isValid }?.let { surface ->
+                front4kDirectStreamer.setLocalPreviewSurface(
+                    surface,
+                    directPreviewTexture.width.coerceAtLeast(1),
+                    directPreviewTexture.height.coerceAtLeast(1)
+                )
+            }
+        } else {
+            front4kDirectStreamer.setLocalPreviewSurface(null, 0, 0)
+            directPreviewSurface?.release()
+            directPreviewSurface = null
+            directPreviewTexture.visibility = View.GONE
+            previewView.visibility = View.VISIBLE
         }
     }
 
@@ -1955,6 +2044,8 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     return@addListener
                 }
+
+                setDirectPreviewVisible(false)
 
                 val previewResolutionSelector =
                     ResolutionSelector.Builder()
@@ -3276,6 +3367,7 @@ class MainActivity : AppCompatActivity() {
             )
 
         if (selectedResolution.directFront4k) {
+            setDirectPreviewVisible(true)
             front4kH264FrameCount = 0L
             front4kLastFrameNs = 0L
             front4kLastUiNs = 0L
@@ -3450,6 +3542,7 @@ class MainActivity : AppCompatActivity() {
         backgroundH264Streamer.stop()
         backgroundDirectActive = false
         front4kDirectStreamer.setMjpegOutput(false, streamJpegQuality, 10)
+        setDirectPreviewVisible(false)
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()
@@ -3662,6 +3755,7 @@ class MainActivity : AppCompatActivity() {
         highSpeedH264Streamer.stop()
         backgroundH264Streamer.stop()
         backgroundDirectActive = false
+        setDirectPreviewVisible(false)
         front4kDirectStreamer.stop()
         rtspServer.stop()
         server.stop()

@@ -1,6 +1,6 @@
 # GOAT Cam Build 29
 
-Status: correções de estabilidade + nova rota Camera1 4K frontal aplicadas; compilação Kotlin validada com sucesso; APK de teste ainda não gerado.
+Status: correções de estabilidade + nova rota Camera1 4K frontal aplicadas; compilação completa concluída com sucesso; APK de teste gerado.
 
 ## Problema vindo da Build 28
 - 4K frontal continuava travando no aparelho.
@@ -45,4 +45,7 @@ As telas mostradas pelo usuário incluem:
 - Branch atual: `build-29-goat-cam`.
 - Release não alterada.
 - Validação `:app:compileDebugKotlin` após a nova rota Camera1: SUCCESS.
-- APK Build 29 ainda não gerado.
+- Workflow Android Debug APK run: 37083419675 — SUCCESS.
+- Artefato GitHub Actions: `goat-cam-build-29-debug` (ID 11259810389).
+- APK: `GOAT-Cam-Build-29-Teste.apk` — 4,899,796 bytes.
+- SHA-256 APK: `78f63ceefbb9d6e76dcd430804ede2460583b2f5a467eb40853d553faca8631d`.
